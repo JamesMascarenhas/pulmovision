@@ -124,7 +124,7 @@ class PulmoVisionParameterNode:
     inputVolume: vtkMRMLScalarVolumeNode
     windowCenter: float = -600.0
     windowWidth: float = 1500.0
-    segmentationMethod: "percentile"
+    segmentationMethod: str = "percentile"
     segmentationPercentile: Annotated[float, WithinRange(80.0, 100.0)] = 99.0
     segmentationWedightsPath: Optional[str] = ""
     postprocessEnabled: bool = True
@@ -213,23 +213,23 @@ class PulmoVisionWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
     def initializeParameterNode(self) -> None:
         """Ensure parameter node exists and observed."""
-        # Parameter node stores all user choices in parameter values, node selections, etc.
-        # so that when the scene is saved and reloaded, these settings are restored.
 
         self.setParameterNode(self.logic.getParameterNode())
 
-        # Select default input/output nodes if nothing is selected yet to save a few clicks for ths user
+        # Select default input node if nothing is selected yet
         if not self._parameterNode.inputVolume:
             firstVolumeNode = slicer.mrmlScene.GetFirstNodeByClass("vtkMRMLScalarVolumeNode")
             if firstVolumeNode:
                 self._parameterNode.inputVolume = firstVolumeNode
-        
-        if not self._paraneterNode.outputMaskVolume:
-            maskNode = slicer.mrmlScene.AddNewNewNodeByClass("vtkMRMLScalarVolumeNode", "PulmoVisionMask")
+
+        # Create default mask volume if needed
+        if not self._parameterNode.outputMaskVolume:
+            maskNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode", "PulmoVisionMask")
             self._parameterNode.outputMaskVolume = maskNode
-        
+
+        # Create default feature table node if needed
         if not self._parameterNode.outputFeatureTable:
-            tableNode = slicer.mrmlScene.AddNewNewNodeByClass("vtkMRMLTableNode", "PulmoVisionRadiomics")
+            tableNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", "PulmoVisionRadiomics")
             self._parameterNode.outputFeatureTable = tableNode
 
     def setParameterNode(self, inputParameterNode: Optional[PulmoVisionParameterNode]) -> None:
@@ -259,15 +259,15 @@ class PulmoVisionWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
     def onApplyButton(self) -> None:
         """Run processing when user clicks "Apply" button."""
-        self.ui.statusLabel.text = _("Running PulmoVision pipeline…")
+        self.ui.statusLabel.setText(_("Running PulmoVision pipeline…"))
         try:
             with slicer.util.tryWithErrorDisplay(_("PulmoVision processing failed."), waitCursor=True):
                 self.logic.process(self._parameterNode, showResult=True)
         except Exception:
-            self.ui.statusLabel.text = _("PulmoVision processing failed")
+            self.ui.statusLabel.setText(_("PulmoVision processing failed"))
             raise
         else:
-            self.ui.statusLabel.text = _("PulmoVision completed successfully")
+            self.ui.statusLabel.setText(_("PulmoVision completed successfully"))
 
 
 # 
