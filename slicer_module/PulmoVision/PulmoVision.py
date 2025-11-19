@@ -1,8 +1,6 @@
 import logging
 import os
 from typing import Annotated, Optional
-from PulmoBackend.pipeline import run_pulmo_pipeline
-import numpy as np
 
 import vtk
 
@@ -299,39 +297,19 @@ class PulmoVisionLogic(ScriptedLoadableModuleLogic):
         import time
 
         startTime = time.time()
-        logging.info("PulmoVision pipeline started")
+        logging.info("Processing started")
 
-        # 1) Slicer volume -> NumPy (D, H, W)
-        inputArray_DHW = slicer.util.arrayFromVolume(inputVolume)
-        if inputArray_DHW.ndim != 3:
-            raise ValueError(f"Input volume must be 3D, got shape {inputArray_DHW.shape}")
+        # Compute the thresholded output volume using the "Threshold Scalar Volume" CLI module
+        cliParams = {
+            "InputVolume": inputVolume.GetID(),
+            "OutputVolume": outputVolume.GetID(),
+            "ThresholdValue": imageThreshold,
+            "ThresholdType": "Above" if invert else "Below",
+        }
+        cliNode = slicer.cli.run(slicer.modules.thresholdscalarvolume, None, cliParams, wait_for_completion=True, update_display=showResult)
+        # We don't need the CLI module node anymore, remove it to not clutter the scene with it
+        slicer.mrmlScene.RemoveNode(cliNode)
 
-        # 2) Reorder to (H, W, D) for backend
-        inputArray_HWD = np.transpose(inputArray_DHW, (1, 2, 0))
-
-        # 3) Run backend pipeline
-        mask_HWD = run_pulmo_pipeline(
-            inputArray_HWD,
-            window_center=-600.0,
-            window_width=1500.0,
-            normalize=True,
-            segmentation_method="percentile",
-            segmentation_kwargs={"percentile": 99.0},
-            return_intermediates=False,
-        )
-
-        # 4) Back to Slicer format (D, H, W) and update output
-        mask_DHW = np.transpose(mask_HWD.astype(np.float32), (2, 0, 1))
-        slicer.util.updateVolumeFromArray(outputVolume, mask_DHW)
-        slicer.modules.volumes.logic().CloneVolumeGeometry(inputVolume, outputVolume)
-
-        # 5) Show result as overlay
-        if showResult:
-            slicer.util.setSliceViewerLayers(
-                background=inputVolume,
-                foreground=outputVolume,
-                foregroundOpacity=0.5,
-            )
         stopTime = time.time()
         logging.info(f"Processing completed in {stopTime-startTime:.2f} seconds")
 
@@ -358,64 +336,48 @@ class PulmoVisionTest(ScriptedLoadableModuleTest):
         self.test_PulmoVision1()
 
     def test_PulmoVision1(self):
+        """Ideally you should have several levels of tests.  At the lowest level
+        tests should exercise the functionality of the logic with different inputs
+        (both valid and invalid).  At higher levels your tests should emulate the
+        way the user would interact with your code and confirm that it still works
+        the way you intended.
+        One of the most important features of the tests is that it should alert other
+        developers when their changes will have an impact on the behavior of your
+        module.  For example, if a developer removes a feature that you depend on,
+        your test should break so they know that the feature is needed.
         """
-        Basic end-to-end test for PulmoVision logic using sample data.
 
-        - Loads a sample volume
-        - Runs the PulmoVision pipeline via logic.process
-        - Verifies that:
-          * the output volume has the same shape as input
-          * the output is binary (0 or 1)
-          * there is at least some foreground
-        """
+        self.delayDisplay("Starting the test")
 
-        self.delayDisplay("Starting PulmoVision test")
+        # Get/create input data
 
         import SampleData
+
         registerSampleData()
         inputVolume = SampleData.downloadSample("PulmoVision1")
-        self.delayDisplay("Loaded test dataset")
+        self.delayDisplay("Loaded test data set")
 
-        # Create output volume node
+        inputScalarRange = inputVolume.GetImageData().GetScalarRange()
+        self.assertEqual(inputScalarRange[0], 0)
+        self.assertEqual(inputScalarRange[1], 695)
+
         outputVolume = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
-        outputVolume.SetName("PulmoVisionTestOutput")
+        threshold = 100
 
-        # Run the logic (threshold parameters are unused in pipeline)
+        # Test the module logic
+
         logic = PulmoVisionLogic()
-        logic.process(
-            inputVolume=inputVolume,
-            outputVolume=outputVolume,
-            imageThreshold=100,   # unused but required by signature
-            invert=False,         # unused
-            showResult=False,
-        )
 
-        # Convert back to numpy for validation
-        inputArray = slicer.util.arrayFromVolume(inputVolume)     # (D, H, W)
-        outputArray = slicer.util.arrayFromVolume(outputVolume)   # (D, H, W)
+        # Test algorithm with non-inverted threshold
+        logic.process(inputVolume, outputVolume, threshold, True)
+        outputScalarRange = outputVolume.GetImageData().GetScalarRange()
+        self.assertEqual(outputScalarRange[0], inputScalarRange[0])
+        self.assertEqual(outputScalarRange[1], threshold)
 
-        # 1) Shape check
-        self.assertEqual(
-            inputArray.shape,
-            outputArray.shape,
-            f"Output shape {outputArray.shape} does not match input {inputArray.shape}",
-        )
+        # Test algorithm with inverted threshold
+        logic.process(inputVolume, outputVolume, threshold, False)
+        outputScalarRange = outputVolume.GetImageData().GetScalarRange()
+        self.assertEqual(outputScalarRange[0], inputScalarRange[0])
+        self.assertEqual(outputScalarRange[1], inputScalarRange[1])
 
-        # 2) Mask should be binary (0 or 1)
-        unique_vals = np.unique(outputArray)
-        for v in unique_vals.tolist():
-            self.assertIn(
-                v,
-                (0.0, 1.0),
-                f"Output mask contains non-binary value: {v}",
-            )
-
-        # 3) Ensure non-empty segmentation
-        num_foreground = int(np.sum(outputArray > 0.5))
-        self.assertGreater(
-            num_foreground,
-            0,
-            "Output mask has no foreground voxels."
-        )
-
-        self.delayDisplay(f"PulmoVision test passed. Foreground voxels = {num_foreground}")
+        self.delayDisplay("Test passed")
