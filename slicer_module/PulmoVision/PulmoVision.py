@@ -380,48 +380,62 @@ class PulmoVisionTest(ScriptedLoadableModuleTest):
         self.test_PulmoVision1()
 
     def test_PulmoVision1(self):
-        """Ideally you should have several levels of tests.  At the lowest level
-        tests should exercise the functionality of the logic with different inputs
-        (both valid and invalid).  At higher levels your tests should emulate the
-        way the user would interact with your code and confirm that it still works
-        the way you intended.
-        One of the most important features of the tests is that it should alert other
-        developers when their changes will have an impact on the behavior of your
-        module.  For example, if a developer removes a feature that you depend on,
-        your test should break so they know that the feature is needed.
+        """
+        End-to-end test for PulmoVision.
+
+        Loads sample data, runs the PulmoVisionLogic.process(), and verifies:
+        - Output volume geometry matches input.
+        - Output contains a binary mask (values in {0, 1}).
+        - There is at least one foreground voxel.
         """
 
-        self.delayDisplay("Starting the test")
-
-        # Get/create input data
+        self.delayDisplay("Starting PulmoVision1 test")
 
         import SampleData
+        import numpy as np
 
+        # Load sample CT
         registerSampleData()
         inputVolume = SampleData.downloadSample("PulmoVision1")
-        self.delayDisplay("Loaded test data set")
+        self.delayDisplay("Loaded PulmoVision1 test data set")
 
-        inputScalarRange = inputVolume.GetImageData().GetScalarRange()
-        self.assertEqual(inputScalarRange[0], 0)
-        self.assertEqual(inputScalarRange[1], 695)
-
+        # Create output volume node
         outputVolume = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
-        threshold = 100
+        outputVolume.SetName("PulmoVisionTestOutput")
 
-        # Test the module logic
-
+        # Run the module logic (threshold params are ignored by our pipeline)
         logic = PulmoVisionLogic()
+        logic.process(
+            inputVolume=inputVolume,
+            outputVolume=outputVolume,
+            imageThreshold=100.0,
+            invert=False,
+            showResult=False,
+        )
 
-        # Test algorithm with non-inverted threshold
-        logic.process(inputVolume, outputVolume, threshold, True)
-        outputScalarRange = outputVolume.GetImageData().GetScalarRange()
-        self.assertEqual(outputScalarRange[0], inputScalarRange[0])
-        self.assertEqual(outputScalarRange[1], threshold)
+        # Get numpy arrays
+        inputArray = slicer.util.arrayFromVolume(inputVolume)
+        outputArray = slicer.util.arrayFromVolume(outputVolume)
 
-        # Test algorithm with inverted threshold
-        logic.process(inputVolume, outputVolume, threshold, False)
-        outputScalarRange = outputVolume.GetImageData().GetScalarRange()
-        self.assertEqual(outputScalarRange[0], inputScalarRange[0])
-        self.assertEqual(outputScalarRange[1], inputScalarRange[1])
+        # 1) Shape check: D,H,W must match
+        self.assertEqual(
+            inputArray.shape,
+            outputArray.shape,
+            msg=f"Output shape {outputArray.shape} does not match input shape {inputArray.shape}",
+        )
 
-        self.delayDisplay("Test passed")
+        # 2) Value check: output should be binary (0/1)
+        unique_vals = np.unique(outputArray)
+        self.assertTrue(
+            np.all(np.isin(unique_vals, [0.0, 1.0])),
+            msg=f"Output volume has non-binary values: {unique_vals}",
+        )
+
+        # 3) Sanity: at least one foreground voxel
+        self.assertGreater(
+            np.count_nonzero(outputArray),
+            0,
+            msg="Output mask is entirely empty (no foreground voxels).",
+        )
+
+        self.delayDisplay("PulmoVision1 test passed")
