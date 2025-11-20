@@ -1,9 +1,7 @@
 # PulmoBackend/training.py
 
 import os
-import math
 import random
-import pickle
 from typing import Optional, Tuple
 
 import numpy as np
@@ -13,6 +11,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 from .unet3d import UNet3D
+from .inference import get_default_unet3d_checkpoint_path
 
 
 def create_synthetic_tumor_volume(
@@ -118,11 +117,9 @@ def train_unet3d(
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
     if save_path is None:
-        # Save inside PulmoBackend/checkpoints/
-        base_dir = os.path.dirname(__file__)
-        ckpt_dir = os.path.join(base_dir, "checkpoints")
+        save_path = get_default_unet3d_checkpoint_path()
+        ckpt_dir = os.path.dirname(save_path)
         os.makedirs(ckpt_dir, exist_ok=True)
-        save_path = os.path.join(ckpt_dir, "unet3d_synthetic.pth")
 
     dataset = SyntheticLungTumorDataset(n_samples=n_samples)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=0)
@@ -162,35 +159,13 @@ def train_unet3d(
         avg_loss = running_loss / max(1, len(dataloader))
         print(f"[Epoch {epoch+1}/{epochs}] Loss: {avg_loss:.4f}")
 
-    torch.save(model.state_dict(), save_path)
-    print(f"Saved UNet3D weights to: {save_path}")
-
-
-def generate_stub_checkpoint(save_path: Optional[str] = None) -> str:
-    """
-    Write a tiny placeholder checkpoint for offline environments.
-
-    This keeps the expected file in place so the backend can gracefully
-    fall back to percentile segmentation when trained weights are absent.
-    """
-    if save_path is None:
-        base_dir = os.path.dirname(__file__)
-        ckpt_dir = os.path.join(base_dir, "checkpoints")
-        os.makedirs(ckpt_dir, exist_ok=True)
-        save_path = os.path.join(ckpt_dir, "unet3d_synthetic.pth")
-
     checkpoint = {
-        "state_dict": {},
-        "meta": {
-            "description": "Placeholder checkpoint generated without training",
-            "source": "generate_stub_checkpoint",
-        },
+        "state_dict": model.state_dict(),
+        "base_channels": 16,
+        "note": "Trained UNet3D on synthetic lung tumor dataset",
     }
-
-    with open(save_path, "wb") as f:
-        pickle.dump(checkpoint, f)
-
-    print(f"Saved stub UNet3D checkpoint to: {save_path}")
+    torch.save(checkpoint, save_path)
+    print(f"Saved UNet3D weights to: {save_path}")
     return save_path
 
 

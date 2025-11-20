@@ -419,7 +419,7 @@ class PulmoVisionLogic(ScriptedLoadableModuleLogic):
             normalize=True,
             segmentation_method=segmentation_method,
             segmentation_kwargs=seg_kwargs,
-            return_metdata = True,
+            return_metadata = True,
             postprocess=bool(parameterNode.postprocessEnabled),
             postprocess_kwargs=post_kwargs,
             return_intermediates=False,
