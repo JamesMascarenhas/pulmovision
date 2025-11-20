@@ -342,6 +342,39 @@
         </property>
        </widget>
       </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="radiomicsToggleLabel">
+        <property name="text">
+         <string>Compute radiomics:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QCheckBox" name="radiomicsEnabledCheckBox">
+        <property name="toolTip">
+         <string>Enable summary radiomics feature computation.</string>
+        </property>
+        <property name="checked">
+         <bool>true</bool>
+        </property>
+        <property name="SlicerParameterName" stdset="0">
+         <string>radiomicsEnabled</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0" colspan="2">
+       <widget class="qMRMLTableView" name="featureTableView">
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>120</height>
+         </size>
+        </property>
+        <property name="toolTip">
+         <string>Preview of computed radiomics features.</string>
+        </property>
+       </widget>
+      </item>
      </layout>
     </widget>
    </item>
@@ -411,6 +444,11 @@
    <class>ctkPathLineEdit</class>
    <extends>QLineEdit</extends>
    <header>ctkPathLineEdit.h</header>
+  </customwidget>
+  <customwidget>
+   <class>qMRMLTableView</class>
+   <extends>QTableView</extends>
+   <header>qMRMLTableView.h</header>
   </customwidget>
  </customwidgets>
  <resources/>

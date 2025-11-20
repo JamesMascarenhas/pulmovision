@@ -134,6 +134,7 @@ class PulmoVisionParameterNode:
     postprocessEnabled: bool = True
     keepLargestComponent: bool = False
     minComponentSize: int = 0
+    radiomicsEnabled: bool = True
     outputMaskVolume: vtkMRMLScalarVolumeNode
     outputFeatureTable: vtkMRMLTableNode
 
@@ -187,6 +188,9 @@ class PulmoVisionWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # Make sure parameter node is initialized (needed for module reload)
         self.initializeParameterNode()
 
+        if hasattr(self.ui, "featureTableView"):
+            self.ui.featureTableView.setMRMLScene(slicer.mrmlScene)
+
     def cleanup(self) -> None:
         """Called when the application closes and the module widget is destroyed."""
         self.removeObservers()
@@ -235,6 +239,8 @@ class PulmoVisionWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         if not self._parameterNode.outputFeatureTable:
             tableNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", "PulmoVisionRadiomics")
             self._parameterNode.outputFeatureTable = tableNode
+            if hasattr(self.ui, "featureTableView"):
+                self.ui.featureTableView.setMRMLTableNode(tableNode)
 
     def setParameterNode(self, inputParameterNode: Optional[PulmoVisionParameterNode]) -> None:
         """
@@ -252,6 +258,8 @@ class PulmoVisionWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self._parameterNodeGuiTag = self._parameterNode.connectGui(self.ui)
             self.addObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self._checkCanApply)
             self._checkCanApply()
+            if hasattr(self.ui, "featureTableView"):
+                self.ui.featureTableView.setMRMLTableNode(self._parameterNode.outputFeatureTable)
 
     def _checkCanApply(self, caller=None, event=None) -> None:
         if self._parameterNode and self._parameterNode.inputVolume and self._parameterNode.outputMaskVolume:
@@ -260,6 +268,8 @@ class PulmoVisionWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         else:
             self.ui.applyButton.toolTip = _("Select input and output nodes")
             self.ui.applyButton.enabled = False
+        if hasattr(self.ui, "featureTableView") and self._parameterNode:
+            self.ui.featureTableView.setMRMLTableNode(self._parameterNode.outputFeatureTable)
 
     def onApplyButton(self) -> None:
         """Run processing when user clicks "Apply" button."""
@@ -354,7 +364,10 @@ class PulmoVisionLogic(ScriptedLoadableModuleLogic):
             "min_size_voxels": int(parameterNode.minComponentSize),
         }
 
-        mask_HWD = run_pulmo_pipeline(
+        spacing_ijk = inputVolume.GetSpacing()
+        voxel_spacing_hwd = (float(spacing_ijk[1]), float(spacing_ijk[0]), float(spacing_ijk[2]))
+
+        pipeline_result = run_pulmo_pipeline(
             volume_HWD,
             window_center=float(parameterNode.windowCenter),
             window_width=float(parameterNode.windowWidth),
@@ -364,7 +377,16 @@ class PulmoVisionLogic(ScriptedLoadableModuleLogic):
             postprocess=bool(parameterNode.postprocessEnabled),
             postprocess_kwargs=post_kwargs,
             return_intermediates=False,
+            compute_features=bool(parameterNode.radiomicsEnabled),
+            voxel_spacing=voxel_spacing_hwd,
         )
+
+        if parameterNode.radiomicsEnabled:
+            mask_HWD = pipeline_result["mask"]
+            features = pipeline_result.get("features") or {}
+        else:
+            mask_HWD = pipeline_result
+            features = None
 
         if mask_HWD.shape != volume_HWD.shape:
             raise RuntimeError(
@@ -385,9 +407,9 @@ class PulmoVisionLogic(ScriptedLoadableModuleLogic):
             )
 
         feature_results = None
-        if parameterNode.outputFeatureTable:
+        if parameterNode.outputFeatureTable and parameterNode.radiomicsEnabled:
             feature_results = self._updateFeatureTable(
-                parameterNode.outputFeatureTable, inputArray_DHW, mask_DHW, inputVolume
+                 parameterNode.outputFeatureTable, features or {}
             )
     
         stopTime = time.time()
@@ -395,40 +417,10 @@ class PulmoVisionLogic(ScriptedLoadableModuleLogic):
 
         return {"mask": mask_DHW, "features": feature_results}
 
-    def _updateFeatureTable(self, tableNode, inputArray_DHW, mask_DHW, inputVolume):
-        """Populate a MRML table node with simple radiomics-style summaries."""
+    def _updateFeatureTable(self, tableNode, features):
+        """Populate a MRML table node with radiomics-style summaries."""
 
-        import numpy as np
-
-        voxel_spacing = inputVolume.GetSpacing()
-        voxel_volume_mm3 = float(voxel_spacing[0] * voxel_spacing[1] * voxel_spacing[2])
-
-        mask_binary = mask_DHW > 0
-        voxel_count = int(mask_binary.sum())
-        volume_mm3 = voxel_volume_mm3 * voxel_count
-        volume_ml = volume_mm3 / 1000.0
-
-        if voxel_count > 0:
-            masked_values = inputArray_DHW[mask_binary]
-            mean_hu = float(masked_values.mean())
-            std_hu = float(masked_values.std())
-            max_hu = float(masked_values.max())
-            min_hu = float(masked_values.min())
-        else:
-            mean_hu = float("nan")
-            std_hu = float("nan")
-            max_hu = float("nan")
-            min_hu = float("nan")
-
-        features = {
-            "Voxels": voxel_count,
-            "Volume (mm^3)": volume_mm3,
-            "Volume (mL)": volume_ml,
-            "Mean HU": mean_hu,
-            "Std HU": std_hu,
-            "Min HU": min_hu,
-            "Max HU": max_hu,
-        }
+        features = features or {}
 
         table = tableNode.GetTable()
         table.Initialize()
@@ -446,6 +438,8 @@ class PulmoVisionLogic(ScriptedLoadableModuleLogic):
             table.SetValue(row_idx, 1, vtk.vtkVariant(float(value)))
 
         tableNode.Modified()
+        if hasattr(self.ui, "featureTableView"):
+            self.ui.featureTableView.setMRMLTableNode(tableNode)
         return features
 
 #

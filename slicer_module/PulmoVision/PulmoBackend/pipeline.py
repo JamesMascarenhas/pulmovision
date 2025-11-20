@@ -16,6 +16,7 @@ import numpy as np
 from .preprocessing import preprocess_ct
 from .inference import run_placeholder_segmentation
 from .postprocessing import postprocess_mask
+from .radiomics import compute_radiomics_features
 
 
 def run_pulmo_pipeline(volume,
@@ -30,7 +31,10 @@ def run_pulmo_pipeline(volume,
                        segmentation_kwargs=None,
                        postprocess=True,
                        postprocess_kwargs=None,
-                       return_intermediates=False):
+                       return_intermediates=False,
+                       compute_features=False,
+                       feature_kwargs=None,
+                       voxel_spacing=(1.0, 1.0, 1.0)):
     """
     Run the PulmoVision end-to-end pipeline on a CT volume.
 
@@ -77,15 +81,22 @@ def run_pulmo_pipeline(volume,
 
     Returns
     -------
-    If return_intermediates is False:
+    If return_intermediates is False and compute_features is False:
         mask : np.ndarray
             Binary segmentation mask, same shape as input, dtype uint8.
+    If compute_features is True:
+        outputs : dict
+            {
+                "mask": np.ndarray (uint8),
+                "features": dict of radiomics features,
+            }
     If return_intermediates is True:
         outputs : dict
             {
                 "preprocessed_volume": np.ndarray (float32),
                 "raw_mask": np.ndarray (uint8),
                 "final_mask": np.ndarray (uint8),
+                "features": dict or None,
             }
     """
     vol = np.asarray(volume)
@@ -121,13 +132,29 @@ def run_pulmo_pipeline(volume,
         final_mask = postprocess_mask(raw_mask, **postprocess_kwargs)
     else:
         final_mask = raw_mask
+    
+    features = None
+    if compute_features:
+        if feature_kwargs is None:
+            feature_kwargs = {}
+        features = compute_radiomics_features(
+            vol,
+            final_mask,
+            voxel_spacing=voxel_spacing,
+            **feature_kwargs,
+        )
+
 
     if return_intermediates:
         return {
             "preprocessed_volume": preprocessed,
             "raw_mask": raw_mask,
             "final_mask": final_mask,
+            "features": features,
         }
-    else:
-        return final_mask
+    
+    if compute_features:
+        return {"mask": final_mask, "features": features}
+
+    return final_mask
 
