@@ -234,6 +234,7 @@ def run_unet3d_segmentation(
     volume: np.ndarray,
     *,
     weights_path: Optional[str] = None,
+    model: Optional[UNet3D] = None,
     device: Optional[str] = None,
     threshold: float = 0.5,
     seed: int = 0,
@@ -244,7 +245,6 @@ def run_unet3d_segmentation(
     Args:
         volume: H x W x D float32 numpy array in [0, 1] or similar.
         weights_path: Optional path to .pth file. If None, uses default checkpoints path.
-        model: Optional[UNet3D] = None,
         device: 'cpu' or 'cuda'.
         threshold: probability threshold for binarizing the output.
 

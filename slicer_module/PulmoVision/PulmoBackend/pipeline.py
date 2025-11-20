@@ -92,6 +92,7 @@ def run_pulmo_pipeline(volume,
             {
                 "mask": np.ndarray (uint8),
                 "features": dict of radiomics features,
+                "segmentation_metadata": dict or None (if return_metadata is True),
             }
     If return_intermediates is True:
         outputs : dict
@@ -100,6 +101,7 @@ def run_pulmo_pipeline(volume,
                 "raw_mask": np.ndarray (uint8),
                 "final_mask": np.ndarray (uint8),
                 "features": dict or None,
+                "segmentation_metadata": dict or None (if return_metadata is True),      
             }
     """
     vol = np.asarray(volume)
@@ -122,11 +124,17 @@ def run_pulmo_pipeline(volume,
         segmentation_kwargs = {}
     else:
         segmentation_kwargs = dict(segmentation_kwargs)
-    raw_mask = run_placeholder_segmentation(
+    segmentation_output = run_placeholder_segmentation(
         preprocessed,
         method=segmentation_method,
+        return_metadata=bool(return_metadata),
         **segmentation_kwargs,
     )
+
+    if return_metadata:
+        raw_mask, segmentation_metadata = segmentation_output
+    else:
+        raw_mask, segmentation_metadata = segmentation_output, None
 
     # 3. Postprocessing
     if postprocess:
@@ -154,10 +162,17 @@ def run_pulmo_pipeline(volume,
             "raw_mask": raw_mask,
             "final_mask": final_mask,
             "features": features,
+            "segmentation_metadata": segmentation_metadata,
         }
     
     if compute_features:
-        return {"mask": final_mask, "features": features}
+        return {
+            "mask": final_mask,
+            "features": features,
+            "segmentation_metadata": segmentation_metadata,
+        }
+
+    if return_metadata:
+        return {"mask": final_mask, "segmentation_metadata": segmentation_metadata}
 
     return final_mask
-
