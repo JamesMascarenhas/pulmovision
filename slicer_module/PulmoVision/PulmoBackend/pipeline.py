@@ -29,6 +29,7 @@ def run_pulmo_pipeline(volume,
                        norm_out_max=1.0,
                        segmentation_method="auto",
                        segmentation_kwargs=None,
+                       return_metadata=False,
                        postprocess=True,
                        postprocess_kwargs=None,
                        return_intermediates=False,
@@ -71,6 +72,8 @@ def run_pulmo_pipeline(volume,
         Extra keyword arguments forwarded to the segmentation function.
         For method "percentile", you can pass {"percentile": 99.0}, etc.
         For method "unet3d"/"auto", pass {"weights_path": ..., "device": ..., "threshold": ...}.
+        return_metadata : bool, optional
+        If True, return segmentation metadata (used/requested method, checkpoint info). 
     postprocess : bool, optional
         If True, apply postprocess_mask to the raw mask.
     postprocess_kwargs : dict, optional
