@@ -95,6 +95,14 @@ def ensure_default_unet3d_checkpoint(base_channels: int = 2) -> Tuple[str, bool]
     weights_path = get_default_unet3d_checkpoint_path()
     if os.path.exists(weights_path):
         return weights_path, False
+    
+    if not _TORCH_AVAILABLE:
+        raise RuntimeError(
+            "PyTorch is required to create the synthetic UNet3D checkpoint. "
+            "Install torch inside Slicer (Python Interactor):\n"
+            "    slicer.util.pip_install(\"torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu\")\n"
+            "and restart Slicer before running UNet3D segmentation."
+        )
 
     ckpt_dir = os.path.dirname(weights_path)
     os.makedirs(ckpt_dir, exist_ok=True)
@@ -149,7 +157,9 @@ def load_unet3d_model(
     if not _TORCH_AVAILABLE or UNet3D is None:
         raise RuntimeError(
             "UNet3D segmentation requires PyTorch, which is not available in this "
-            "Slicer Python environment."
+            "Slicer Python environment. Install torch inside Slicer (Python Interactor):\n"
+            "    slicer.util.pip_install(\"torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu\")\n"
+            "and restart Slicer before running UNet3D segmentation."
         )
 
     if device is None:
@@ -368,8 +378,20 @@ def run_placeholder_segmentation(
         metadata["used_method"] = "percentile"
         mask = percentile_threshold_segmentation(volume, percentile=percentile)
         return (mask, metadata) if return_metadata else mask
+    
+    torch_ready = _TORCH_AVAILABLE and UNet3D is not None
 
     if method in {"unet3d", "auto"}:
+        if not torch_ready:
+            metadata["messages"].append(
+                "UNet3D segmentation requires PyTorch. Install it via the Slicer Python Interactor:\n"
+                "    slicer.util.pip_install(\"torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu\")\n"
+                "Restart Slicer afterward to enable the 'unet3d' and 'auto' methods."
+            )
+            metadata["used_method"] = "percentile"
+            mask = percentile_threshold_segmentation(volume, percentile=percentile)
+            return (mask, metadata) if return_metadata else mask
+        
         weights_path = kwargs.get("weights_path") or None
         if weights_path is None:
             try:
