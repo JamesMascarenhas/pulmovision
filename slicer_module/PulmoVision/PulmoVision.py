@@ -31,22 +31,31 @@ class PulmoVision(ScriptedLoadableModule):
 
     def __init__(self, parent):
         ScriptedLoadableModule.__init__(self, parent)
-        self.parent.title = _("PulmoVision")  # TODO: make this more human readable by adding spaces
-        # TODO: set categories (folders where the module shows up in the module selector)
-        self.parent.categories = [translate("qSlicerAbstractCoreModule", "Examples")]
-        self.parent.dependencies = []  # TODO: add here list of module names that this module requires
-        self.parent.contributors = ["John Doe (AnyWare Corp.)"]  # TODO: replace with "Firstname Lastname (Organization)"
-        # TODO: update with short description of the module and a link to online module documentation
-        # _() function marks text as translatable to other languages
-        self.parent.helpText = _("""
-This is an example of scripted loadable module bundled in an extension.
-See more information in <a href="https://github.com/organization/projectname#PulmoVision">module documentation</a>.
-""")
-        # TODO: replace with organization, grant and thanks
-        self.parent.acknowledgementText = _("""
-This file was originally developed by Jean-Christophe Fillion-Robin, Kitware Inc., Andras Lasso, PerkLab,
-and Steve Pieper, Isomics, Inc. and was partially funded by NIH grant 3P41RR013218-12S1.
-""")
+        self.parent.title = _("PulmoVision")
+        self.parent.categories = [
+            translate("qSlicerAbstractCoreModule", "Segmentation"),
+            translate("qSlicerAbstractCoreModule", "Quantification"),
+        ]
+        self.parent.dependencies = []
+        self.parent.contributors = [
+            "James Mascarenhas (Queen's University)",
+            "Jihyeon Park (Queen's University)",
+        ]
+        self.parent.helpText = _(
+            """
+PulmoVision provides an end-to-end lung CT workflow including preprocessing, AI segmentation,
+post-processing, and radiomics feature extraction. Open a CT volume, choose a segmentation method
+("Auto" will select the best available), and click "Run Full Pipeline" to generate a mask and summary
+table. See the <a href="https://github.com/jamesmascarenhas/SlicerPulmoVision#readme">project documentation</a>
+for setup details and training instructions.
+"""
+        )
+        self.parent.acknowledgementText = _(
+            """
+Developed by James Mascarenhas and Jihyeon Park at Queen's University for CISC 881 (Medical Informatics).
+We acknowledge the Slicer community for the ScriptedLoadableModule framework and training resources.
+"""
+        )
 
         # Additional initialization step after application startup is complete
         slicer.app.connect("startupCompleted()", registerSampleData)
