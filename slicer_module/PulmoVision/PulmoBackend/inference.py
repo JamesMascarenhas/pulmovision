@@ -132,19 +132,73 @@ def ensure_default_unet3d_checkpoint(base_channels: int = 2) -> Tuple[str, bool]
 
 def get_default_checkpoint_status(device: Optional[str] = None) -> Dict[str, object]:
     """
-    Report whether the default checkpoint exists and is loadable.
+    Report whether a default checkpoint exists and is loadable.
+
+    Priority:
+      1) MSD-trained checkpoint (unet3d_msd.pt)
+      2) Synthetic fallback checkpoint (unet3d_synthetic.pt)
     """
+    if device is None:
+        device = "cuda" if (torch and torch.cuda.is_available()) else "cpu"
+
+    msd_path = get_default_msd_unet3d_checkpoint_path()
+    synthetic_path = get_default_unet3d_checkpoint_path()
+
+    status: Dict[str, object] = {
+        "path": None,
+        "exists": False,
+        "loads": False,
+        "error": None,
+        "is_msd": False,
+        "is_synthetic": False,
+    }
+
+    # --- 1) Prefer MSD checkpoint -----------------------------------------
+    if os.path.exists(msd_path):
+        status["path"] = msd_path
+        status["exists"] = True
+        status["is_msd"] = True
+
+        try:
+            _, loaded_any = load_unet3d_model(
+                weights_path=msd_path,
+                device=device,
+                strict=False,
+            )
+            status["loads"] = bool(loaded_any)
+        except Exception as exc:  # noqa: BLE001 - surface load error
+            status["error"] = str(exc)
+
+        return status
+    
+
     try:
-        default_path, _ = ensure_default_unet3d_checkpoint()
-    except Exception as exc:  # noqa: BLE001 - propagate error details
+        synthetic_path, _ = ensure_default_unet3d_checkpoint()
+    except Exception as exc:  # noqa: BLE001 - surface creation error
         return {
-            "path": get_default_unet3d_checkpoint_path(),
+            "path": synthetic_path,
             "exists": False,
             "loads": False,
             "error": str(exc),
+            "is_msd": False,
+            "is_synthetic": True,
         }
 
-    return get_checkpoint_status(default_path, device=device, prepare_default=False)
+    status["path"] = synthetic_path
+    status["exists"] = os.path.exists(synthetic_path)
+    status["is_synthetic"] = True
+
+    try:
+        _, loaded_any = load_unet3d_model(
+            weights_path=synthetic_path,
+            device=device,
+            strict=False,
+        )
+        status["loads"] = bool(loaded_any)
+    except Exception as exc:  # noqa: BLE001 - surface load error
+        status["error"] = str(exc)
+
+    return status
 
 
 def load_unet3d_model(

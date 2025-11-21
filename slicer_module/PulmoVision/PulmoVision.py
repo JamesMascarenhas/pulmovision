@@ -493,11 +493,11 @@ class PulmoVisionLogic(ScriptedLoadableModuleLogic):
         if not segmentation_metadata:
             return
 
-        requested = segmentation_metadata.get("requested_method")
-        used = segmentation_metadata.get("used_method") or requested
+        requested = (segmentation_metadata.get("requested_method") or "").strip()
+        used = (segmentation_metadata.get("used_method") or requested or "").strip()
         messages = list(segmentation_metadata.get("messages") or [])
 
-        if requested and used and requested != used:
+        if used == "percentile" and requested and requested != used:
             messages.append(
                 _(
                     f"Segmentation method '{requested}' fell back to '{used}'. Checkpoints may be missing or unusable."
