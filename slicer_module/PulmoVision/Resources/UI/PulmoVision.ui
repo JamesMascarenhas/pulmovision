@@ -2,6 +2,90 @@
 <ui version="4.0">
  <class>PulmoVision</class>
  <widget class="qMRMLWidget" name="PulmoVision">
+   <property name="styleSheet">
+   <string notr="true">qMRMLWidget {
+  background-color: #0f1a24;
+  color: #e9f1fb;
+}
+
+QLabel {
+  color: #d5e1f2;
+  font-size: 12px;
+}
+
+QLabel#titleLabel {
+  font-size: 19px;
+  font-weight: 700;
+  color: #f2f6ff;
+}
+
+QLabel#subtitleLabel {
+  color: #9cb3cc;
+  font-size: 12px;
+}
+
+ctkCollapsibleButton {
+  background-color: #132231;
+  border: 1px solid #1f3246;
+  border-radius: 10px;
+  font-weight: 600;
+  color: #dce8f7;
+  padding: 8px 10px;
+}
+
+ctkCollapsibleButton::title {
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
+ctkCollapsibleButton:hover {
+  border-color: #2f4d6d;
+  background-color: #182a3c;
+}
+
+QFrame#headerFrame {
+  background: qlineargradient(y1:0, y2:1, stop:0 #1c2c3d, stop:1 #0f1823);
+  border-radius: 12px;
+  border: 1px solid #23374d;
+  padding: 14px;
+}
+
+QPushButton {
+  background-color: #1e87d6;
+  color: #f7fbff;
+  font-weight: 700;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid #1b6aa5;
+}
+
+QPushButton:pressed {
+  background-color: #1667a5;
+}
+
+QPushButton:disabled {
+  background-color: #6f86a2;
+  color: #d5dce6;
+}
+
+QCheckBox, QComboBox, ctkSliderWidget, QSpinBox {
+  color: #dce8f7;
+  selection-background-color: #1e87d6;
+}
+
+QFrame#cardFrame {
+  background-color: #121f2c;
+  border: 1px solid #21344a;
+  border-radius: 10px;
+  padding: 10px;
+}
+
+QLabel#statusLabel {
+  color: #9cb3cc;
+  font-weight: 600;
+}
+</string>
+  </property>
   <property name="geometry">
    <rect>
     <x>0</x>
@@ -11,6 +95,21 @@
    </rect>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
+   <property name="spacing">
+    <number>10</number>
+   </property>
+   <property name="leftMargin">
+    <number>12</number>
+   </property>
+   <property name="topMargin">
+    <number>12</number>
+   </property>
+   <property name="rightMargin">
+    <number>12</number>
+   </property>
+   <property name="bottomMargin">
+    <number>12</number>
+   </property>
    <item>
     <widget class="QFrame" name="headerFrame">
      <property name="frameShape">
@@ -19,12 +118,9 @@
      <property name="frameShadow">
       <enum>QFrame::Raised</enum>
      </property>
-     <property name="styleSheet">
-      <string notr="true">QFrame {background: qlineargradient(y1:0, y2:1, stop:0 #f7f9fc, stop:1 #eef2f7); border-radius: 8px; border: 1px solid #d6deeb; padding: 10px;} QLabel#titleLabel {font-size: 18px; font-weight: 600; color: #1f3b57;} QLabel#subtitleLabel {color: #4a5a6a;}</string>
-     </property>
      <layout class="QVBoxLayout" name="headerLayout">
       <property name="spacing">
-       <number>4</number>
+       <number>6</number>
       </property>
       <item>
        <widget class="QLabel" name="titleLabel">
@@ -36,12 +132,58 @@
       <item>
        <widget class="QLabel" name="subtitleLabel">
         <property name="text">
-         <string>Select your inputs, pick a segmentation strategy, and generate a radiomics summary in one click.</string>
+         <string>Pick your inputs, choose a segmentation strategy, and generate a radiomics summary in one click.</string>
         </property>
         <property name="wordWrap">
          <bool>true</bool>
         </property>
        </widget>
+      </item>
+     </layout>
+    </widget>
+  </item>
+   <item>
+    <widget class="QFrame" name="cardFrame">
+     <layout class="QVBoxLayout" name="layoutHighlights">
+      <property name="spacing">
+       <number>6</number>
+      </property>
+      <item>
+       <widget class="QLabel" name="pipelineHighlightLabel">
+        <property name="text">
+         <string>&lt;b&gt;Pipeline overview&lt;/b&gt; — inputs, segmentation, postprocessing, and radiomics results live in one place.</string>
+        </property>
+        <property name="wordWrap">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="chipLayout">
+        <property name="spacing">
+         <number>8</number>
+        </property>
+        <item>
+         <widget class="QLabel" name="chipLabel1">
+          <property name="styleSheet">
+           <string notr="true">QLabel {background-color: #1c2d40; border: 1px solid #27405c; border-radius: 10px; padding: 6px 10px; color: #a8c4e3;}</string>
+          </property>
+          <property name="text">
+           <string>CT windowing ready</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="chipLabel2">
+          <property name="styleSheet">
+           <string notr="true">QLabel {background-color: #1c2d40; border: 1px solid #27405c; border-radius: 10px; padding: 6px 10px; color: #a8c4e3;}</string>
+          </property>
+          <property name="text">
+           <string>Automated cleanup enabled</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
       </item>
      </layout>
     </widget>
@@ -420,7 +562,30 @@
      <string>Run the PulmoVision pipeline.</string>
     </property>
     <property name="styleSheet">
-     <string notr="true">QPushButton {background-color: #2d7dd2; color: white; font-weight: 600; padding: 10px 14px; border-radius: 6px;} QPushButton:pressed {background-color: #1f5fa3;} QPushButton:disabled {background-color: #9bb7d1; color: #eef2f7;}</string>
+     <string notr="true">#applyButton {
+  background-color: #132231;
+  color: #dce8f7;
+  font-weight: 700;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid #1f3246;
+}
+
+#applyButton:hover {
+  background-color: #182a3c;
+  border-color: #2f4d6d;
+}
+
+#applyButton:pressed {
+  background-color: #0f1a24;
+  border-color: #2f4d6d;
+}
+
+#applyButton:disabled {
+  background-color: #1c2d40;
+  color: #6f86a2;
+  border-color: #1f3246;
+}</string>
     </property>
     <property name="text">
      <string>Run PulmoVision</string>
