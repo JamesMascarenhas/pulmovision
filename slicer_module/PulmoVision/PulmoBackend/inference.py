@@ -78,10 +78,18 @@ def percentile_threshold_segmentation(volume, percentile=99.0):
 def get_default_unet3d_checkpoint_path() -> str:
     """
     Default location of the UNet3D weights file (PyTorch .pt)
+    for the sythetic placeholder model used in initial demos
     """
     base_dir = os.path.dirname(__file__)
     ckpt_dir = os.path.join(base_dir, "checkpoints")
     return os.path.join(ckpt_dir, "unet3d_synthetic.pt")
+
+
+def get_default_msd_unet3d_checkpoint_path() -> str:
+    """Default location for UNet3D weights trained on MSD Task06 Lung."""
+    base_dir = os.path.dirname(__file__)
+    ckpt_dir = os.path.join(base_dir, "checkpoints")
+    return os.path.join(ckpt_dir, "unet3d_msd.pt")
 
 
 def ensure_default_unet3d_checkpoint(base_channels: int = 2) -> Tuple[str, bool]:
@@ -166,11 +174,17 @@ def load_unet3d_model(
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Ensure we have a checkpoint path
+    # Prefer a MSD-trained checkpoint if present, otherwise fall back to synthetic
+    # weights so that the pipeline remains usable
     if weights_path is None:
-        # This should return a valid path and a metadata dict
-        weights_path, _ = ensure_default_unet3d_checkpoint(
-            base_channels=base_channels or 16
-        )
+        msd_default = get_default_msd_unet3d_checkpoint_path()
+        if os.path.exists(msd_default):
+            weights_path = msd_default
+        else:
+            # This returns a valid path and a metadata dict
+            weights_path, _ = ensure_default_unet3d_checkpoint(
+                base_channels=base_channels or 16
+            )
 
     base_channels_from_ckpt: Optional[int] = None
 
@@ -233,17 +247,24 @@ def get_checkpoint_status(
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    resolved_path = weights_path or get_default_unet3d_checkpoint_path()
-    if prepare_default and weights_path is None:
-        try:
-            resolved_path, _ = ensure_default_unet3d_checkpoint()
-        except Exception as exc:  # noqa: BLE001 - surface creation error
-            return {
-                "path": resolved_path,
-                "exists": False,
-                "loads": False,
-                "error": str(exc),
-            }
+    if weights_path is None:
+        msd_default = get_default_msd_unet3d_checkpoint_path()
+        if os.path.exists(msd_default):
+            resolved_path = msd_default
+        else:
+            resolved_path = get_default_unet3d_checkpoint_path()
+            if prepare_default:
+                try:
+                    resolved_path, _ = ensure_default_unet3d_checkpoint()
+                except Exception as exc:  # noqa: BLE001 - surface creation error
+                    return {
+                        "path": resolved_path,
+                        "exists": False,
+                        "loads": False,
+                        "error": str(exc),
+                    }
+    else:
+        resolved_path = weights_path
     status: Dict[str, object] = {
         "path": resolved_path,
         "exists": os.path.exists(resolved_path),
