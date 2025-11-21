@@ -59,7 +59,7 @@ Task06_Lung/
 ```
 
 ## Enabling UNet3D Segmentation (PyTorch Support)
-The **UNet3D** and **Auto** segmentation modes require **PyTorch**.  
+The **UNet3D** segmentation mode requires **PyTorch**.
 3D Slicer does *not* include PyTorch by default, so it must be installed inside Slicer.
 
 1. Open **Extensions Manager** in Slicer  
