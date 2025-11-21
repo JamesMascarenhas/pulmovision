@@ -409,7 +409,7 @@ def run_unet3d_segmentation(
 
 def run_placeholder_segmentation(
     volume,
-    method="percentile",
+    method="unet3d",
     *,
     return_metadata: bool = False,
     **kwargs,
@@ -437,7 +437,7 @@ def run_placeholder_segmentation(
         When return_metadata=True, a dictionary describing which segmentation
         strategy was used and any fallback messages.
     """
-    method = (method or "").lower().strip() or "auto"
+    method = (method or "").lower().strip() or "unet3d"
     percentile = float(kwargs.pop("percentile", 99.0))
     device = kwargs.get("device")
     seed = kwargs.get("seed", 0)
@@ -457,13 +457,13 @@ def run_placeholder_segmentation(
     
     torch_ready = _TORCH_AVAILABLE and UNet3D is not None
 
-    if method in {"unet3d", "auto"}:
+    if method == "unet3d":
         if not torch_ready:
             metadata["messages"].append(
                 "UNet3D segmentation unavailable: PyTorch is not installed."
                 "Install the official 'PyTorch' extension using Slicer's Extensions Manager:"
                 "  View → Extensions Manager → Search 'PyTorch' → Install"
-                "After installing and restarting Slicer, UNet3D and auto segmentation will be enabled."
+                "After installing and restarting Slicer, UNet3D segmentation will be enabled"
             )
             metadata["used_method"] = "percentile"
             mask = percentile_threshold_segmentation(volume, percentile=percentile)

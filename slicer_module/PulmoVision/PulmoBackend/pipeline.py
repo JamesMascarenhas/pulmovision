@@ -27,7 +27,7 @@ def run_pulmo_pipeline(volume,
                        normalize=True,
                        norm_out_min=0.0,
                        norm_out_max=1.0,
-                       segmentation_method="auto",
+                       segmentation_method="unet3d",
                        segmentation_kwargs=None,
                        return_metadata=False,
                        postprocess=True,
@@ -67,11 +67,10 @@ def run_pulmo_pipeline(volume,
         Segmentation method name for the backend. Currently:
         - "percentile": use run_placeholder_segmentation with percentile threshold.
         - "unet3d": attempt UNet3D inference; fall back to percentile if weights missing.
-        - "auto": try UNet3D if usable weights are available, otherwise percentile.
     segmentation_kwargs : dict, optional
         Extra keyword arguments forwarded to the segmentation function.
         For method "percentile", you can pass {"percentile": 99.0}, etc.
-        For method "unet3d"/"auto", pass {"weights_path": ..., "device": ..., "threshold": ...}.
+        For method "unet3d", pass {"weights_path": ..., "device": ..., "threshold": ...}.
         return_metadata : bool, optional
         If True, return segmentation metadata (used/requested method, checkpoint info). 
     postprocess : bool, optional

@@ -45,7 +45,7 @@ class PulmoVision(ScriptedLoadableModule):
             """
 PulmoVision provides an end-to-end lung CT workflow including preprocessing, AI segmentation,
 post-processing, and radiomics feature extraction. Open a CT volume, choose a segmentation method
-("Auto" will select the best available), and click "Run Full Pipeline" to generate a mask and summary
+("UNet3D" will fall back to the percentile heuristic if unavailable), and click "Run Full Pipeline" to generate a mask and summary
 table. See the <a href="https://github.com/jamesmascarenhas/SlicerPulmoVision#readme">project documentation</a>
 for setup details and training instructions.
 """
@@ -123,7 +123,7 @@ class PulmoVisionParameterNode:
 
     inputVolume - CT input volume
     windowCenter/windowWidth - CT windowing parameters forwarded to the backend
-    segmentationMethod - Backend segmentation algoirthm (percentile, unet3d, or auto)
+    ssegmentationMethod - Backend segmentation algoirthm (percentile or unet3d)
     segmentationPercentile - Percent threshold used by the lightweight method
     segmentationWeightsPath - Optional path to a UNet3D checkpoint file
     segmentationDevice - Compute device hint for UNet3D inference
@@ -137,7 +137,7 @@ class PulmoVisionParameterNode:
     inputVolume: vtkMRMLScalarVolumeNode
     windowCenter: Annotated[float, WithinRange(-1200.0, 400.0)] = -600.0
     windowWidth: Annotated[float, WithinRange(100.0, 4000.0)] = 1500.0
-    segmentationMethod: Annotated[str, Choice(["auto", "percentile", "unet3d"])] = "auto"
+    segmentationMethod: Annotated[str, Choice(["percentile", "unet3d"])] = "unet3d"
     segmentationPercentile: Annotated[float, WithinRange(80.0, 100.0)] = 99.0
     segmentationDevice: str = ""
     segmentationThreshold: Annotated[float, WithinRange(0.0, 1.0)] = 0.5
@@ -402,26 +402,18 @@ class PulmoVisionLogic(ScriptedLoadableModuleLogic):
         # Backend convention: (H, W, D)
         volume_HWD = np.transpose(inputArray_DHW, (1, 2, 0)).astype(np.float32)
 
-        segmentation_method = parameterNode.segmentationMethod.lower().strip()
+        segmentation_method = (parameterNode.segmentationMethod or "").lower().strip() or "unet3d"
         seg_kwargs = {}
 
         if "percentile" in segmentation_method:
             seg_kwargs["percentile"] = float(parameterNode.segmentationPercentile)
             segmentation_method = "percentile"
 
-        elif "unet3d" in segmentation_method:
+        else:
+            segmentation_method = "unet3d"
             seg_kwargs["device"] = parameterNode.segmentationDevice or None
             seg_kwargs["threshold"] = float(parameterNode.segmentationThreshold)
-            segmentation_method = "unet3d"
-
-        elif not segmentation_method or "auto" in segmentation_method:
-            segmentation_method = "auto"
-            seg_kwargs = {
-                "device": parameterNode.segmentationDevice or None,
-                "threshold": float(parameterNode.segmentationThreshold),
-                "percentile": float(parameterNode.segmentationPercentile),
-            }
-
+            
         post_kwargs = {
             "keep_largest_component": bool(parameterNode.keepLargestComponent),
             "min_size_voxels": int(parameterNode.minComponentSize),
@@ -594,7 +586,7 @@ class PulmoVisionTest(ScriptedLoadableModuleTest):
         parameterNode.inputVolume = inputVolume
         parameterNode.outputMaskVolume = outputVolume
         parameterNode.outputFeatureTable = featureTable
-        parameterNode.segmentationMethod = "auto"
+        parameterNode.segmentationMethod = "unet3d"
         parameterNode.segmentationPercentile = 99.0
         parameterNode.postprocessEnabled = True
 
