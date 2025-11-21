@@ -42,7 +42,23 @@ or
 5. Restart Slicer.
 6. The PulmoVision module will appear in the module list.
 
-## Usage
+## Enabling UNet3D Segmentation (PyTorch Support)
+The **UNet3D** and **Auto** segmentation modes require **PyTorch**.  
+3D Slicer does *not* include PyTorch by default, so it must be installed inside Slicer.
+
+1. Open **Extensions Manager** in Slicer  
+2. Search for **“PyTorch”**  
+3. Install the **PyTorch** extension  
+4. Restart Slicer  
+5. Verify installation inside the Python Interactor:
+
+```python
+import PyTorchUtils
+torch = PyTorchUtils.PyTorchUtilsLogic().torch
+print("PyTorch version:", torch.__version__)
+```
+
+If this runs without errors, PyTorch is active and UNet3D segmentation is enabled.
 
 ### Running the Full Pipeline (3D Slicer)
 
