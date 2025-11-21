@@ -3,6 +3,7 @@ PulmoVision Backend - Inference
 
 This module provides:
 - Simple percentile-based placeholder segmentation.
+- Classical HU-Threshold segmentation.
 - UNet3D-based segmentation using a trained model.
 
 All functions operate on NumPy arrays, typically preprocessed volumes with
@@ -67,6 +68,36 @@ def percentile_threshold_segmentation(volume, percentile=99.0):
 
     thresh = float(np.percentile(vol, percentile))
     mask = (vol >= thresh).astype(np.uint8)
+    return mask
+
+
+# -------------------------------------------------------------------------
+# HU threshold segmentation (classical baseline)
+# -------------------------------------------------------------------------
+
+
+def hu_threshold_segmentation(volume, threshold_hu: float = -300.0) -> np.ndarray:
+    """Segment a volume by applying a fixed HU threshold.
+
+    Parameters
+    ----------
+    volume : np.ndarray
+        Raw CT volume in Hounsfield Units, shape (H, W, D).
+    threshold_hu : float, optional
+        HU cutoff for inclusion in the mask. Literature-aligned default is -300 HU.
+
+    Returns
+    -------
+    mask : np.ndarray
+        Binary mask, same shape as input, dtype uint8 (0 or 1).
+    """
+
+    vol = np.asarray(volume, dtype=np.float32)
+
+    if vol.ndim != 3:
+        raise ValueError("hu_threshold_segmentation expects a 3D volume (H, W, D)")
+
+    mask = (vol >= float(threshold_hu)).astype(np.uint8)
     return mask
 
 
@@ -442,6 +473,7 @@ def run_placeholder_segmentation(
     *,
     return_metadata: bool = False,
     allow_fallback_to_percentile: bool = False,
+    hu_volume: Optional[np.ndarray] = None,
     **kwargs,
 ):
     """
@@ -456,6 +488,7 @@ def run_placeholder_segmentation(
         Segmentation method name. Supported:
         - "percentile": uses percentile_threshold_segmentation
           kwargs: percentile=...
+          "hu_threshold": fixed HU cutoff (threshold_hu=-300 by default).
         - "unet3d": uses run_unet3d_segmentation
           kwargs: weights_path=..., device=..., threshold=...
 
@@ -469,6 +502,7 @@ def run_placeholder_segmentation(
     """
     method = (method or "").lower().strip() or "unet3d"
     percentile = float(kwargs.pop("percentile", 99.0))
+    threshold_hu = float(kwargs.pop("threshold_hu", -300.0))
     device = kwargs.get("device")
     seed = kwargs.get("seed", 0)
     metadata: Dict[str, object] = {
@@ -481,6 +515,12 @@ def run_placeholder_segmentation(
         "checkpoint_metadata": None,
     }
 
+    if method == "hu_threshold":
+        metadata["used_method"] = "hu_threshold"
+        hu_source = volume if hu_volume is None else hu_volume
+        mask = hu_threshold_segmentation(hu_source, threshold_hu=threshold_hu)
+        return (mask, metadata) if return_metadata else mask
+    
     if method == "percentile":
         metadata["used_method"] = "percentile"
         mask = percentile_threshold_segmentation(volume, percentile=percentile)
@@ -491,13 +531,12 @@ def run_placeholder_segmentation(
     if method == "unet3d":
         if not torch_ready:
             metadata["messages"].append(
-                "UNet3D segmentation unavailable: PyTorch is not installed."
-                "Install the official 'PyTorch' extension using Slicer's Extensions Manager:"
-                "  View → Extensions Manager → Search 'PyTorch' → Install"
-                "After installing and restarting Slicer, UNet3D segmentation will be enabled"
+                "UNet3D segmentation unavailable: PyTorch is not installed. "
+                "Applying classical HU thresholding at -300 HU."
             )
-            metadata["used_method"] = "percentile"
-            mask = percentile_threshold_segmentation(volume, percentile=percentile)
+            metadata["used_method"] = "hu_threshold"
+            hu_source = volume if hu_volume is None else hu_volume
+            mask = hu_threshold_segmentation(hu_source, threshold_hu=threshold_hu)
             return (mask, metadata) if return_metadata else mask
         
         weights_path = kwargs.get("weights_path") or None
@@ -537,11 +576,16 @@ def run_placeholder_segmentation(
                 return (mask, metadata) if return_metadata else mask
             except Exception as exc:  # noqa: BLE001 - signal fallback cause
                 metadata["messages"].append(
-                    f"UNet3D segmentation unavailable ({exc}). Falling back to percentile heuristic."
+                    f"UNet3D segmentation unavailable ({exc})."
                 )
         if not allow_fallback_to_percentile:
-            messages = "; ".join(metadata.get("messages", [])) or "UNet3D checkpoint unavailable"
-            raise RuntimeError(messages)
+            metadata["messages"].append(
+                "UNet3D was requested but usable weights were not found; applying HU threshold fallback at -300 HU."
+            )
+            metadata["used_method"] = "hu_threshold"
+            hu_source = volume if hu_volume is None else hu_volume
+            mask = hu_threshold_segmentation(hu_source, threshold_hu=threshold_hu)
+            return (mask, metadata) if return_metadata else mask
         
         if method == "unet3d" and metadata["used_method"] != "unet3d":
             metadata["messages"].append(

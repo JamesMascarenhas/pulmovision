@@ -65,14 +65,16 @@ def run_pulmo_pipeline(volume,
         Upper bound of normalization range (default 1.0).
     segmentation_method : str, optional
         Segmentation method name for the backend. Currently:
-        - "percentile": use run_placeholder_segmentation with percentile threshold.
-        - "unet3d": attempt UNet3D inference; fall back to percentile if weights missing.
+       - "hu_threshold": classical fixed HU cutoff (threshold_hu=-300 by default).
+        - "percentile": debug-only percentile heuristic.
+        - "unet3d": attempt UNet3D inference; falls back to HU threshold if unavailable.
     segmentation_kwargs : dict, optional
         Extra keyword arguments forwarded to the segmentation function.
         For method "percentile", you can pass {"percentile": 99.0}, etc.
+        For method "hu_threshold", pass {"threshold_hu": -300.0} to override the default.
         For method "unet3d", pass {"weights_path": ..., "device": ..., "threshold": ...}.
         return_metadata : bool, optional
-        If True, return segmentation metadata (used/requested method, checkpoint info). 
+        If True, return segmentation metadata (used/requested method, checkpoint info).
     postprocess : bool, optional
         If True, apply postprocess_mask to the raw mask.
     postprocess_kwargs : dict, optional
@@ -123,10 +125,19 @@ def run_pulmo_pipeline(volume,
         segmentation_kwargs = {}
     else:
         segmentation_kwargs = dict(segmentation_kwargs)
+
+    # HU-threshold segmentation and UNet fallbacks must operate on HU values.
+    hu_volume = vol.astype(np.float32)
+
+    segmentation_volume = preprocessed
+    if (segmentation_method or "").lower().strip() == "hu_threshold":
+        segmentation_volume = hu_volume
+
     segmentation_output = run_placeholder_segmentation(
-        preprocessed,
+        segmentation_volume,
         method=segmentation_method,
         return_metadata=bool(return_metadata),
+        hu_volume=hu_volume,
         **segmentation_kwargs,
     )
 

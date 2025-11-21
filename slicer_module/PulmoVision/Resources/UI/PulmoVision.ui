@@ -312,12 +312,17 @@ QLabel#statusLabel {
         </property>
         <item>
             <property name="text">
-                <string>unet3d</string>
+                <string>UNet3D (recommended)</string>
             </property>
             </item>
             <item>
             <property name="text">
-                <string>percentile</string>
+                <string>Classical HU Thresholding</string>
+            </property>
+            </item>
+            <item>
+            <property name="text">
+                <string>Percentile (debug)</string>
             </property>
             </item>
         <property name="SlicerParameterName" stdset="0">
@@ -328,7 +333,7 @@ QLabel#statusLabel {
       <item row="1" column="0">
        <widget class="QLabel" name="percentileLabel">
         <property name="text">
-         <string>Percentile threshold:</string>
+         <string>Percentile threshold (debug):</string>
         </property>
        </widget>
       </item>
