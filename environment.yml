@@ -17,5 +17,3 @@ dependencies:
   - pyyaml>=6.0
   - matplotlib>=3.8
   - pip
-  - pip:
-      - pyradiomics>=3.1
