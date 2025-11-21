@@ -11,7 +11,7 @@ values in [0, 1].
 
 import os
 import warnings
-from typing import Optional, Dict, Tuple
+from typing import Optional, Dict, Tuple, Any
 
 import numpy as np
 
@@ -92,13 +92,26 @@ def get_default_msd_unet3d_checkpoint_path() -> str:
     return os.path.join(ckpt_dir, "unet3d_msd.pt")
 
 
+def _checkpoint_metadata(state: Dict[str, Any]) -> Dict[str, Any]:
+    meta = state.get("meta", {}) if isinstance(state, dict) else {}
+    base_channels = meta.get("base_channels") or state.get("base_channels")
+    return {
+        "schema_version": meta.get("schema_version", 1),
+        "trained_on": meta.get("trained_on", "unknown"),
+        "checkpoint_type": meta.get("checkpoint_type", "unknown"),
+        "package_version": meta.get("package_version"),
+        "git_sha": meta.get("git_sha"),
+        "base_channels": base_channels,
+        "notes": meta.get("notes"),
+    }
+
+
 def ensure_default_unet3d_checkpoint(base_channels: int = 2) -> Tuple[str, bool]:
     """
-    Make sure a lightweight synthetic checkpoint exists on disk.
+    Preserve the legacy synthetic checkpoint for explicit demo use.
 
-    Returns the path and a boolean indicating whether the file was created.
-    This keeps the default file extension aligned with future trained models
-    while allowing the demo pipeline to run without bundled weights.
+    Default segmentation now expects a real MSD checkpoint; this helper is kept
+    for tests or controlled fallbacks.
     """
     weights_path = get_default_unet3d_checkpoint_path()
     if os.path.exists(weights_path):
@@ -106,7 +119,7 @@ def ensure_default_unet3d_checkpoint(base_channels: int = 2) -> Tuple[str, bool]
     
     if not _TORCH_AVAILABLE:
         raise RuntimeError(
-             "UNet3D requires PyTorch, which is not installed in this Slicer environment."
+            "UNet3D requires PyTorch, which is not installed in this Slicer environment."
             "To enable UNet3D segmentation, install the official 'PyTorch' extension from:"
             "  Slicer → View → Extensions Manager → Search: PyTorch → Install"
             "Then restart Slicer and try again."
@@ -120,8 +133,13 @@ def ensure_default_unet3d_checkpoint(base_channels: int = 2) -> Tuple[str, bool]
         model = UNet3D(in_channels=1, out_channels=1, base_channels=base_channels)
         checkpoint = {
             "state_dict": model.state_dict(),
-            "base_channels": base_channels,
-            "note": "Synthetic placeholder weights for PulmoVision demo.",
+            "meta": {
+                "schema_version": 1,
+                "trained_on": "synthetic demo",
+                "checkpoint_type": "synthetic-demo",
+                "base_channels": base_channels,
+                "notes": "Synthetic placeholder weights for PulmoVision demo.",
+            },
         }
         torch.save(checkpoint, weights_path)
     except Exception as exc:  # noqa: BLE001 - propagate for status checks
@@ -151,6 +169,7 @@ def get_default_checkpoint_status(device: Optional[str] = None) -> Dict[str, obj
         "error": None,
         "is_msd": False,
         "is_synthetic": False,
+        "metadata": None,
     }
 
     # --- 1) Prefer MSD checkpoint -----------------------------------------
@@ -166,37 +185,32 @@ def get_default_checkpoint_status(device: Optional[str] = None) -> Dict[str, obj
                 strict=False,
             )
             status["loads"] = bool(loaded_any)
+            checkpoint = torch.load(msd_path, map_location=device)
+            status["metadata"] = _checkpoint_metadata(checkpoint)
         except Exception as exc:  # noqa: BLE001 - surface load error
             status["error"] = str(exc)
 
         return status
     
 
-    try:
-        synthetic_path, _ = ensure_default_unet3d_checkpoint()
-    except Exception as exc:  # noqa: BLE001 - surface creation error
-        return {
-            "path": synthetic_path,
-            "exists": False,
-            "loads": False,
-            "error": str(exc),
-            "is_msd": False,
-            "is_synthetic": True,
-        }
-
-    status["path"] = synthetic_path
-    status["exists"] = os.path.exists(synthetic_path)
-    status["is_synthetic"] = True
-
-    try:
-        _, loaded_any = load_unet3d_model(
-            weights_path=synthetic_path,
-            device=device,
-            strict=False,
-        )
-        status["loads"] = bool(loaded_any)
-    except Exception as exc:  # noqa: BLE001 - surface load error
-        status["error"] = str(exc)
+    synthetic_path = get_default_unet3d_checkpoint_path()
+    if os.path.exists(synthetic_path):
+        status["path"] = synthetic_path
+        status["exists"] = True
+        status["is_synthetic"] = True
+        try:
+            checkpoint = torch.load(synthetic_path, map_location=device)
+            _, loaded_any = load_unet3d_model(
+                weights_path=synthetic_path,
+                device=device,
+                strict=False,
+            )
+            status["loads"] = bool(loaded_any)
+            status["metadata"] = _checkpoint_metadata(checkpoint)
+        except Exception as exc:  # noqa: BLE001 - surface load error
+            status["error"] = str(exc)
+    else:
+        status["error"] = "MSD checkpoint missing; synthetic fallback not prepared"
 
     return status
 
@@ -209,6 +223,7 @@ def load_unet3d_model(
     seed: int = 0,
     base_channels: Optional[int] = None,
     state_dict: Optional[Dict[str, object]] = None,
+    allow_synthetic_fallback: bool = False,
 ) -> Tuple[object, bool]:
     """
     Load UNet3D with saved weights.
@@ -227,20 +242,25 @@ def load_unet3d_model(
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # Ensure we have a checkpoint path
-    # Prefer a MSD-trained checkpoint if present, otherwise fall back to synthetic
-    # weights so that the pipeline remains usable
+    # Ensure we have a checkpoint path. Default now requires MSD weights and will
+    # raise a clear error if they are missing.
     if weights_path is None:
         msd_default = get_default_msd_unet3d_checkpoint_path()
         if os.path.exists(msd_default):
             weights_path = msd_default
-        else:
-            # This returns a valid path and a metadata dict
+        elif allow_synthetic_fallback:
             weights_path, _ = ensure_default_unet3d_checkpoint(
                 base_channels=base_channels or 16
             )
+        else:
+            raise FileNotFoundError(
+                f"UNet3D weights not found at default path {msd_default}. "
+                "Download Task06_Lung via data/prepare_msd_lung.py and train PulmoBackend.training."
+            )
 
     base_channels_from_ckpt: Optional[int] = None
+
+    meta_info: Dict[str, Any] = {}
 
     # Load checkpoint if caller didn't pass a state_dict directly
     if state_dict is None:
@@ -252,9 +272,8 @@ def load_unet3d_model(
 
         checkpoint = torch.load(weights_path, map_location=device)
         if isinstance(checkpoint, dict):
-            base_channels_from_ckpt = checkpoint.get("meta", {}).get(
-                "base_channels", checkpoint.get("base_channels")
-            )
+            meta_info = _checkpoint_metadata(checkpoint)
+            base_channels_from_ckpt = meta_info.get("base_channels")
             state_dict = checkpoint.get("state_dict", checkpoint)
         else:
             state_dict = checkpoint
@@ -286,6 +305,9 @@ def load_unet3d_model(
     model.eval()
 
     loaded_any = len(state_dict) > 0 and len(missing) < len(model.state_dict())
+    if meta_info:
+        model._pulmovision_meta = meta_info  # type: ignore[attr-defined]
+
     return model, loaded_any
 
 
@@ -324,6 +346,7 @@ def get_checkpoint_status(
         "exists": os.path.exists(resolved_path),
         "loads": False,
         "error": None,
+        "metadata": None,
     }
 
     if not status["exists"]:
@@ -336,12 +359,18 @@ def get_checkpoint_status(
             device=device,
             strict=False,
             seed=0,
+            allow_synthetic_fallback=True,
         )
     except Exception as exc:  # noqa: BLE001 - propagate root cause in status
         status["error"] = str(exc)
         return status
 
     status["loads"] = bool(loaded_any)
+    try:
+        checkpoint = torch.load(resolved_path, map_location=device)
+        status["metadata"] = _checkpoint_metadata(checkpoint)
+    except Exception:
+        status["metadata"] = None
     return status
 
 
@@ -412,6 +441,7 @@ def run_placeholder_segmentation(
     method="unet3d",
     *,
     return_metadata: bool = False,
+    allow_fallback_to_percentile: bool = False,
     **kwargs,
 ):
     """
@@ -448,6 +478,7 @@ def run_placeholder_segmentation(
         "checkpoint_exists": False,
         "checkpoint_loaded": False,
         "messages": [],
+        "checkpoint_metadata": None,
     }
 
     if method == "percentile":
@@ -471,21 +502,8 @@ def run_placeholder_segmentation(
         
         weights_path = kwargs.get("weights_path") or None
         if weights_path is None:
-            msd_default = get_default_msd_unet3d_checkpoint_path()
-            if os.path.exists(msd_default):
-                weights_path = msd_default
-                metadata["weights_path"] = weights_path
-            else:
-                try:
-                    weights_path, _ = ensure_default_unet3d_checkpoint()
-                except Exception as exc:  # noqa: BLE001 - surface creation issues
-                    metadata["weights_path"] = get_default_unet3d_checkpoint_path()
-                    metadata["messages"].append(str(exc))
-                    weights_path = metadata["weights_path"]
-                else:
-                    metadata["weights_path"] = weights_path
-        else:
-            metadata["weights_path"] = weights_path
+            weights_path = get_default_msd_unet3d_checkpoint_path()
+        metadata["weights_path"] = weights_path
 
         model = None
         try:
@@ -494,9 +512,12 @@ def run_placeholder_segmentation(
                 device=device,
                 seed=seed,
                 strict=False,
+                allow_synthetic_fallback=allow_fallback_to_percentile,
             )
             metadata["checkpoint_exists"] = True
             metadata["checkpoint_loaded"] = bool(loaded_any)
+            if hasattr(model, "_pulmovision_meta"):
+                metadata["checkpoint_metadata"] = getattr(model, "_pulmovision_meta")
         except FileNotFoundError as exc:
             metadata["checkpoint_exists"] = False
             metadata["messages"].append(str(exc))
@@ -518,7 +539,10 @@ def run_placeholder_segmentation(
                 metadata["messages"].append(
                     f"UNet3D segmentation unavailable ({exc}). Falling back to percentile heuristic."
                 )
-
+        if not allow_fallback_to_percentile:
+            messages = "; ".join(metadata.get("messages", [])) or "UNet3D checkpoint unavailable"
+            raise RuntimeError(messages)
+        
         if method == "unet3d" and metadata["used_method"] != "unet3d":
             metadata["messages"].append(
                 "UNet3D was requested but usable weights were not found; using percentile segmentation instead."

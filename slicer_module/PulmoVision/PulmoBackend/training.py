@@ -12,7 +12,10 @@ import torch.nn as nn
 import torch.optim as optim
 
 from .unet3d import UNet3D
-from .inference import get_default_unet3d_checkpoint_path
+from .inference import (
+    get_default_unet3d_checkpoint_path,
+    get_default_msd_unet3d_checkpoint_path,
+)
 from .msd_lung_dataset import MSDTask06LungDataset, get_default_msd_root
 
 
@@ -124,12 +127,6 @@ def _resolve_data_root(data_root: Optional[str], training_on_james: bool = False
             f"James-specific dataset path does not exist: {candidate}. Please verify the download."
         )
 
-    if data_root is None:
-        prompt = input(
-            "Path to MSD Task06 Lung dataset (dataset.json, imagesTr, labelsTr): "
-        ).strip()
-        data_root = prompt or None
-
     if data_root is not None:
         candidate = os.path.abspath(data_root)
         if os.path.exists(candidate):
@@ -209,8 +206,13 @@ def train_unet3d(
 
     checkpoint = {
         "state_dict": model.state_dict(),
-        "base_channels": 16,
-        "note": "Trained UNet3D on synthetic lung tumor dataset",
+        "meta": {
+            "schema_version": 1,
+            "trained_on": "synthetic lung tumor demo",
+            "base_channels": 16,
+            "checkpoint_type": "synthetic-demo",
+            "notes": "Trained UNet3D on synthetic lung tumor dataset",
+        },
     }
     torch.save(checkpoint, save_path)
     print(f"Saved UNet3D weights to: {save_path}")
@@ -253,7 +255,7 @@ def train_msd_unet3d(
         raise FileNotFoundError(f"MSD data root does not exist: {resolved_root}")
 
     if save_path is None:
-        save_path = get_default_unet3d_checkpoint_path()
+        save_path = get_default_msd_unet3d_checkpoint_path()
         ckpt_dir = os.path.dirname(save_path)
         os.makedirs(ckpt_dir, exist_ok=True)
 
@@ -300,8 +302,16 @@ def train_msd_unet3d(
 
     checkpoint = {
         "state_dict": model.state_dict(),
-        "base_channels": 16,
-        "note": "Trained UNet3D on MSD Task06 Lung patches",
+        "meta": {
+            "schema_version": 1,
+            "trained_on": "Task06_Lung",
+            "checkpoint_type": "msd-task06",
+            "base_channels": 16,
+            "epochs": epochs,
+            "patch_size": list(patch_size),
+            "lr": lr,
+            "notes": "Trained UNet3D on MSD Task06 Lung patches",
+        },
     }
     torch.save(checkpoint, save_path)
     print(f"Saved UNet3D weights to: {save_path}")
