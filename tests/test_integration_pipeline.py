@@ -20,7 +20,7 @@ def test_pipeline_runs_with_msd_checkpoint():
         segmentation_method="unet3d",
         segmentation_kwargs={
             "weights_path": get_default_msd_unet3d_checkpoint_path(),
-            "allow_fallback_to_percentile": False,
+            "allow_hu_threshold_fallback": False,
             "threshold": 0.5,
         },
         postprocess=False,

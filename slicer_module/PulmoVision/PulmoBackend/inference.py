@@ -472,7 +472,7 @@ def run_placeholder_segmentation(
     method="unet3d",
     *,
     return_metadata: bool = False,
-    allow_fallback_to_percentile: bool = False,
+   allow_hu_threshold_fallback: bool = False,
     hu_volume: Optional[np.ndarray] = None,
     **kwargs,
 ):
@@ -491,11 +491,9 @@ def run_placeholder_segmentation(
           "hu_threshold": fixed HU cutoff (threshold_hu=-300 by default).
         - "unet3d": uses run_unet3d_segmentation
           kwargs: weights_path=..., device=..., threshold=...
-    allow_fallback_to_percentile : bool, optional
-        Historical flag for enabling a fallback when UNet3D is unavailable. When
-        True (or when allow_hu_threshold_fallback is passed in kwargs), the
-        pipeline now falls back to hu_threshold_segmentation rather than
-        percentile_threshold_segmentation.
+    allow_hu_threshold_fallback : bool, optional
+        When True (or when allow_hu_threshold_fallback is passed in kwargs),
+        allow UNet3D failures to fall back to hu_threshold_segmentation.
 
     Returns
     -------
@@ -507,7 +505,7 @@ def run_placeholder_segmentation(
     """
     method = (method or "").lower().strip() or "unet3d"
     allow_hu_threshold_fallback = bool(
-        kwargs.pop("allow_hu_threshold_fallback", allow_fallback_to_percentile)
+        kwargs.pop("allow_hu_threshold_fallback", allow_hu_threshold_fallback)
     )
     percentile = float(kwargs.pop("percentile", 99.0))
     threshold_hu = float(kwargs.pop("threshold_hu", -300.0))
@@ -545,7 +543,7 @@ def run_placeholder_segmentation(
                 "Apply classical HU thresholding at -300 HU or install the missing dependencies."
             )
             metadata["messages"].append(msg)
-            if not allow_fallback_to_percentile:
+            if not allow_hu_threshold_fallback:
                 raise RuntimeError(msg)
 
             metadata["used_method"] = "hu_threshold"
@@ -574,7 +572,7 @@ def run_placeholder_segmentation(
         except FileNotFoundError as exc:
             metadata["checkpoint_exists"] = False
             metadata["messages"].append(str(exc))
-            if not allow_fallback_to_percentile:
+            if not allow_hu_threshold_fallback:
                 raise RuntimeError(str(exc))
         except Exception as exc:  # noqa: BLE001 - surface load errors
             metadata["checkpoint_exists"] = True
@@ -606,7 +604,7 @@ def run_placeholder_segmentation(
             
         if method == "unet3d" and metadata["used_method"] != "unet3d":
             metadata["messages"].append(
-                "UNet3D was requested but usable weights were not found; using percentile segmentation instead."
+                "UNet3D was requested but usable weights were not found; using HU threshold segmentation instead."
             )
 
         metadata["used_method"] = "hu_threshold"

@@ -23,7 +23,7 @@ def test_missing_checkpoint_raises_without_fallback():
             vol,
             method="unet3d",
             weights_path=missing,
-            allow_fallback_to_percentile=False,
+            allow_hu_threshold_fallback=False,
         )
 
 
