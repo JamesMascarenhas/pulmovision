@@ -52,6 +52,19 @@ or
 4. Click "Run Full Pipeline".
 5. View tumor segmentation overlays and extracted radiomic features.
 
+#### Enabling the UNet3D / Auto segmentation methods
+
+The UNet3D-backed methods require PyTorch, which is not bundled with the stock Slicer Python.
+Install a CPU-only PyTorch build directly inside Slicer using the Python Interactor (then restart Slicer):
+
+```
+slicer.util.pip_install("torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu")
+```
+
+After restarting, the **auto** and **unet3d** options will load a lightweight checkpoint from
+`slicer_module/PulmoVision/PulmoBackend/checkpoints/unet3d_synthetic.pt`, or you can point the
+`Weights path` parameter at your own trained model.
+
 ### Running Standalone Inference (Python)
 
     from pulmovision.pipeline import run_full_pipeline
