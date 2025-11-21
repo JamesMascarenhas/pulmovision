@@ -313,6 +313,12 @@ class PulmoVisionWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.statusLabel.setText(_("Running PulmoVision pipeline…"))
         result = None
         try:
+            # Explicitly sync the UNet threshold from the slider before running so the 
+            # backend always reciefves the user-selected value
+            if hasattr(self.ui, "unetThresholdSlider") and self._parameterNode:
+                self._parameterNode.segmentationThreshold = float(
+                    self.ui.unetThresholdSlider.value
+                )
             with slicer.util.tryWithErrorDisplay(_("PulmoVision processing failed."), waitCursor=True):
                  result = self.logic.process(self._parameterNode, showResult=True)
         except Exception:
