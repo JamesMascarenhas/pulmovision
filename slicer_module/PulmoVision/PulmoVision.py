@@ -337,7 +337,7 @@ class PulmoVisionWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self.ui.unetThresholdSlider.value = float(
                 self._parameterNode.segmentationThreshold
             )
-            
+
     def onApplyButton(self) -> None:
         """Run processing when user clicks "Apply" button."""
         self.ui.statusLabel.setText(_("Running PulmoVision pipeline…"))
@@ -516,6 +516,14 @@ class PulmoVisionLogic(ScriptedLoadableModuleLogic):
         slicer.util.updateVolumeFromArray(outputMaskVolume, mask_DHW)
         self._copyVolumeGeometry(inputVolume, outputMaskVolume)
 
+        if segmentation_method == "unet3d" and outputMaskVolume:
+            import re
+
+            threshold_pct = int(round(float(parameterNode.segmentationThreshold) * 100))
+            base_name = re.sub(r"\s+\d+%$", "", outputMaskVolume.GetName() or "").strip()
+            if not base_name:
+                base_name = "PulmoVisionMask"
+            outputMaskVolume.SetName(f"{base_name} {threshold_pct}%")
         if showResult:
             slicer.util.setSliceViewerLayers(
                 background=inputVolume,
