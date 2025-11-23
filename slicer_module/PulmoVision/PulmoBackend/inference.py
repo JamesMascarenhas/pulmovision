@@ -12,6 +12,8 @@ values in [0, 1].
 import os
 import warnings
 from typing import Optional, Dict, Tuple, Any
+from .msd_lung_dataset import _normalize_intensity, DEFAULT_CLIP_RANGE
+
 
 import numpy as np
 
@@ -71,6 +73,137 @@ def percentile_threshold_segmentation(volume, percentile=99.0):
 
 
 # -------------------------------------------------------------------------
+<<<<<<< Updated upstream
+=======
+# HU threshold segmentation (classical baseline)
+# -------------------------------------------------------------------------
+
+
+def hu_threshold_segmentation(volume, threshold_hu: float = -300.0) -> np.ndarray:
+    """
+    Heuristic HU-based lung tumor segmentation.
+
+    Strategy:
+      1. Seed lung air as very low HU (HU < -700).
+      2. Dilate a few times to approximate full lung parenchyma.
+      3. Inside this lung ROI, mark voxels denser than lung parenchyma
+         (HU > -150) as tumor candidates.
+      4. Keep only the largest connected component (6-connected).
+
+    Note: `threshold_hu` is kept in the signature for compatibility with
+    callers, but the internal thresholds are tuned for MSD-style lung CT.
+
+    Parameters
+    ----------
+    volume : np.ndarray
+        Raw CT volume in Hounsfield Units, shape (H, W, D).
+    threshold_hu : float, optional
+        Unused in this heuristic (kept for call compatibility).
+
+    Returns
+    -------
+    mask : np.ndarray
+        Binary mask, same shape as input, dtype uint8 (0 or 1).
+    """
+    import numpy as _np
+
+    vol = _np.asarray(volume, dtype=_np.float32)
+    if vol.ndim != 3:
+        raise ValueError("hu_threshold_segmentation expects a 3D volume (H, W, D)")
+
+    H, W, D = vol.shape
+
+    # ------------------------------------------------------------------
+    # 1) Lung air seed: clearly air-like voxels
+    # ------------------------------------------------------------------
+    lung_seed = vol < -700.0  # stricter than -300 to avoid grabbing the whole body
+
+    # ------------------------------------------------------------------
+    # 2) Dilate a bit to approximate full lungs
+    # ------------------------------------------------------------------
+    lung_mask = lung_seed.copy()
+    for _ in range(3):  # fewer iterations: keep ROI near lungs
+        padded = _np.pad(lung_mask, 1, mode="constant", constant_values=False)
+        expanded = _np.zeros_like(lung_mask, dtype=bool)
+        for dz in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    expanded |= padded[
+                        1 + dx : 1 + dx + H,
+                        1 + dy : 1 + dy + W,
+                        1 + dz : 1 + dz + D,
+                    ]
+        lung_mask = expanded
+
+    # ------------------------------------------------------------------
+    # 3) Solid-ish candidates inside lung ROI
+    # ------------------------------------------------------------------
+    solid_candidates = vol > -150.0  # denser than parenchyma, but includes tumor & vessels
+    candidates = lung_mask & solid_candidates
+
+    # Debug summary
+    print(
+        "DEBUG HU (v2):",
+        "lung_seed_voxels =", int(lung_seed.sum()),
+        "lung_mask_voxels =", int(lung_mask.sum()),
+        "candidate_voxels =", int(candidates.sum()),
+    )
+
+    if not _np.any(candidates):
+        return _np.zeros_like(vol, dtype=_np.uint8)
+
+    # ------------------------------------------------------------------
+    # 4) Largest connected component (6-connected) in candidates
+    # ------------------------------------------------------------------
+    visited = _np.zeros_like(candidates, dtype=bool)
+    largest_component = _np.zeros_like(candidates, dtype=bool)
+    max_size = 0
+
+    neighbors = [
+        (1, 0, 0),
+        (-1, 0, 0),
+        (0, 1, 0),
+        (0, -1, 0),
+        (0, 0, 1),
+        (0, 0, -1),
+    ]
+
+    for x in range(H):
+        for y in range(W):
+            for z in range(D):
+                if candidates[x, y, z] and not visited[x, y, z]:
+                    stack = [(x, y, z)]
+                    visited[x, y, z] = True
+                    component_voxels = [(x, y, z)]
+
+                    while stack:
+                        cx, cy, cz = stack.pop()
+                        for dx, dy, dz in neighbors:
+                            nx, ny, nz = cx + dx, cy + dy, cz + dz
+                            if (
+                                0 <= nx < H
+                                and 0 <= ny < W
+                                and 0 <= nz < D
+                                and candidates[nx, ny, nz]
+                                and not visited[nx, ny, nz]
+                            ):
+                                visited[nx, ny, nz] = True
+                                stack.append((nx, ny, nz))
+                                component_voxels.append((nx, ny, nz))
+
+                    comp_size = len(component_voxels)
+                    if comp_size > max_size:
+                        max_size = comp_size
+                        largest_component.fill(False)
+                        for vx, vy, vz in component_voxels:
+                            largest_component[vx, vy, vz] = True
+
+    return largest_component.astype(_np.uint8)
+
+
+
+# -------------------------------------------------------------------------
+>>>>>>> Stashed changes
 # UNet3D-based segmentation
 # -------------------------------------------------------------------------
 
@@ -384,11 +517,13 @@ def run_unet3d_segmentation(
     seed: int = 0,
 ) -> np.ndarray:
     """
-    Run UNet3D-based segmentation on a preprocessed CT volume.
+    Run UNet3D-based segmentation on a CT volume.
 
     Args:
-        volume: H x W x D float32 numpy array in [0, 1] or similar.
-        weights_path: Optional path to .pth file. If None, uses default checkpoints path.
+        volume: H x W x D float32 NumPy array in Hounsfield Units.
+                It will be clipped to DEFAULT_CLIP_RANGE and normalized
+                to [0, 1] using the same logic as the MSD dataset loader.
+        weights_path: Optional path to .pt file. If None, uses default checkpoints path.
         device: 'cpu' or 'cuda'.
         threshold: probability threshold for binarizing the output.
 
@@ -399,7 +534,7 @@ def run_unet3d_segmentation(
         raise ValueError(f"Expected volume of shape (H, W, D), got {volume.shape}")
 
     if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        device = "cuda" if torch and torch.cuda.is_available() else "cpu"
 
     if model is None:
         model, _ = load_unet3d_model(
@@ -409,14 +544,13 @@ def run_unet3d_segmentation(
             strict=False,
         )
 
-    # Normalize volume to [0, 1] if needed
-    v = volume.astype(np.float32)
-    v = (v - v.min()) / (v.max() - v.min() + 1e-6)
+    # Match MSD training preprocessing
+    v = np.asarray(volume, dtype=np.float32)
+    v = _normalize_intensity(v, DEFAULT_CLIP_RANGE)   # [0,1] after HU clip
 
-    # Our convention in the backend: volume is H x W x D.
+    # Backend convention: volume is H x W x D.
     # PyTorch expects N x C x D x H x W.
     v_dhw = np.transpose(v, (2, 0, 1))  # D,H,W
-    # Always use list-based construction because Slicer’s PyTorch lacks NumPy support
     v_tensor = torch.tensor(v_dhw.tolist(), dtype=torch.float32)[None, None, ...]  # 1,1,D,H,W
     v_tensor = v_tensor.to(device)
 
@@ -425,8 +559,18 @@ def run_unet3d_segmentation(
         prob = torch.sigmoid(logits)
 
     prob_np = np.array(prob.cpu().tolist(), dtype=np.float32)[0, 0]  # D,H,W
-    prob_hwd = np.transpose(prob_np, (1, 2, 0))  # back to H,W,D
+    prob_hwd = np.transpose(prob_np, (1, 2, 0))  # H,W,D
 
+<<<<<<< Updated upstream
+=======
+    print(
+        "UNet3D Debug — Probability stats:",
+        "min=", float(prob_np.min()),
+        "max=", float(prob_np.max()),
+        "mean=", float(prob_np.mean()),
+    )
+
+>>>>>>> Stashed changes
     mask = (prob_hwd >= threshold).astype(np.uint8)
     return mask
 

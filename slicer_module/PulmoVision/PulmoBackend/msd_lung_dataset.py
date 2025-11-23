@@ -1,3 +1,5 @@
+# PulmoBackend/msd_lung_dataset.py
+
 """Patch-based MSD Task06 Lung dataset loader for PyTorch."""
 
 import json
@@ -10,6 +12,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+# Canonical HU clip range for MSD lung CT
 DEFAULT_CLIP_RANGE = (-1000.0, 400.0)
 
 
@@ -28,7 +31,9 @@ def get_default_msd_root() -> str:
     repo_root = os.path.abspath(
         os.path.join(os.path.dirname(__file__), os.pardir, os.pardir, os.pardir)
     )
-    return os.path.abspath(os.path.join(os.path.dirname(repo_root), "group_project", "Task06_Lung"))
+    return os.path.abspath(
+        os.path.join(os.path.dirname(repo_root), "group_project", "Task06_Lung")
+    )
 
 
 def _resolve_path(base: str, relative_path: str) -> str:
@@ -51,6 +56,7 @@ def _resolve_path(base: str, relative_path: str) -> str:
 
 
 def _normalize_intensity(volume: np.ndarray, clip_range: Tuple[float, float]) -> np.ndarray:
+    """Clip CT HU to a fixed range and min–max normalize to [0, 1]."""
     volume = np.clip(volume, *clip_range)
     v_min, v_max = volume.min(), volume.max()
     if v_max - v_min > 0:
@@ -103,6 +109,7 @@ def _random_crop_pair(
 def _center_crop_pair(
     image: np.ndarray, label: Optional[np.ndarray], patch_size: Tuple[int, int, int]
 ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+    """Centered crop (used for validation / test)."""
     d, h, w = image.shape
     pd, ph, pw = patch_size
 
@@ -179,6 +186,8 @@ class MSDTask06LungDataset(Dataset):
 
     def __getitem__(self, idx: int):
         image_path, label_path = self.samples[idx]
+
+        # SimpleITK returns (D, H, W)
         image = sitk.ReadImage(image_path)
         image_data = sitk.GetArrayFromImage(image).astype(np.float32)  # (D, H, W)
 
@@ -187,30 +196,65 @@ class MSDTask06LungDataset(Dataset):
             label_image = sitk.ReadImage(label_path)
             label_data = sitk.GetArrayFromImage(label_image).astype(np.float32)
 
+        # Pad to ensure we can always take a full patch
         image_data = _pad_to_minimum(image_data, self.patch_size)
         if label_data is not None:
             label_data = _pad_to_minimum(label_data, self.patch_size)
+            # MSD labels are integers {0,1}; binarize just in case
+            label_data = (label_data > 0).astype(np.float32)
 
+        # -----------------------------
+        # Tumor-aware patch sampling
+        # -----------------------------
         if self.split == "train":
-            image_patch, label_patch = _random_crop_pair(image_data, label_data, self.patch_size)
-        else:
-            image_patch, label_patch = _center_crop_pair(image_data, label_data, self.patch_size)
+            if label_data is not None and np.any(label_data > 0) and random.random() < 0.5:
+                # 50% of the time: center a patch on a random tumor voxel
+                coords = np.argwhere(label_data > 0)  # (N, 3) in (z, y, x)
+                cz, cy, cx = coords[random.randrange(len(coords))]
 
+                d, h, w = image_data.shape
+                pd, ph, pw = self.patch_size
+
+                start_d = max(0, min(int(cz) - pd // 2, d - pd))
+                start_h = max(0, min(int(cy) - ph // 2, h - ph))
+                start_w = max(0, min(int(cx) - pw // 2, w - pw))
+
+                image_patch = image_data[
+                    start_d : start_d + pd, start_h : start_h + ph, start_w : start_w + pw
+                ]
+                label_patch = label_data[
+                    start_d : start_d + pd, start_h : start_h + ph, start_w : start_w + pw
+                ]
+            else:
+                # Remaining 50%: pure random crop for negative/context patches
+                image_patch, label_patch = _random_crop_pair(
+                    image_data, label_data, self.patch_size
+                )
+        else:
+            # For test/val, use a deterministic center crop
+            image_patch, label_patch = _center_crop_pair(
+                image_data, label_data, self.patch_size
+            )
+
+        # Optionally augment
         image_patch, label_patch = self._maybe_augment(image_patch, label_patch)
 
+        # Intensity normalization to match training/inference
         if self.normalize:
             image_patch = _normalize_intensity(image_patch, self.clip_range)
 
         # Ensure contiguous memory layout after flips/crops so torch.from_numpy works
-        image_patch = np.ascontiguousarray(image_patch)
+        image_patch = np.ascontiguousarray(image_patch, dtype=np.float32)
         if label_patch is not None:
-            label_patch = np.ascontiguousarray(label_patch)
-        
+            label_patch = np.ascontiguousarray(label_patch, dtype=np.float32)
+
+        # To tensors: (C, D, H, W) with C=1
         image_tensor = torch.from_numpy(image_patch[None, ...])  # (1, D, H, W)
-        label_tensor = None
+
         if label_patch is not None:
-            label_tensor = torch.from_numpy(label_patch[None, ...])
+            label_tensor = torch.from_numpy(label_patch[None, ...])  # (1, D, H, W)
         else:
+            # For 'test' we still return a tensor of same shape (all zeros)
             label_tensor = torch.zeros_like(image_tensor)
 
         return image_tensor, label_tensor

@@ -119,10 +119,31 @@ def run_pulmo_pipeline(volume,
     )
 
     # 2. Segmentation (placeholder, to be replaced by 3D U-Net later)
+    # 2. Segmentation
     if segmentation_kwargs is None:
         segmentation_kwargs = {}
     else:
         segmentation_kwargs = dict(segmentation_kwargs)
+<<<<<<< Updated upstream
+=======
+
+    method_lower = (segmentation_method or "").lower().strip()
+
+    # Default to a safe HU-threshold fallback when UNet3D is requested.
+    if method_lower == "unet3d":
+        segmentation_kwargs.setdefault("allow_hu_threshold_fallback", True)
+
+    # HU-threshold segmentation and UNet need to operate on HU values.
+    hu_volume = vol.astype(np.float32)
+
+    # Percentile/debug segmentation can work on the preprocessed volume;
+    # classical HU and UNet both see the raw HU array.
+    if method_lower in ("hu_threshold", "unet3d"):
+        segmentation_volume = hu_volume
+    else:
+        segmentation_volume = preprocessed
+
+>>>>>>> Stashed changes
     segmentation_output = run_placeholder_segmentation(
         preprocessed,
         method=segmentation_method,

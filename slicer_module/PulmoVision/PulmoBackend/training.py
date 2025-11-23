@@ -64,9 +64,9 @@ def create_synthetic_tumor_volume(
         mask = np.logical_or(mask, ellipsoid).astype(np.uint8)
 
     # "Tumor" intensities higher than background
-    volume[mask == 1] = np.random.normal(loc=100.0, scale=50.0, size=np.sum(mask)).astype(
-        np.float32
-    )
+    volume[mask == 1] = np.random.normal(
+        loc=100.0, scale=50.0, size=np.sum(mask)
+    ).astype(np.float32)
 
     # Clip to at least look like HU
     volume = np.clip(volume, -1000.0, 500.0)
@@ -93,7 +93,6 @@ class SyntheticLungTumorDataset(Dataset):
         vol = vol.astype(np.float32)
         m = mask.astype(np.float32)
 
-        # Convert to NCDHW later; here we return CHWD (C=1)
         vol = vol[None, ...]  # 1 x H x W x D
         m = m[None, ...]
         return vol, m
@@ -112,12 +111,7 @@ def dice_loss(pred, target, smooth: float = 1.0):
 
 
 def _resolve_data_root(data_root: Optional[str], training_on_james: bool = False) -> str:
-    """Resolve where the MSD Task06 dataset should live.
-
-    If ``training_on_james`` is True, the path is forced to James's local
-    dataset location. Otherwise, we honor an explicit ``data_root`` or prompt
-    the user when not provided.
-    """
+    """Resolve where the MSD Task06 dataset should live."""
 
     if training_on_james:
         candidate = JAMES_DATA_ROOT
@@ -135,7 +129,7 @@ def _resolve_data_root(data_root: Optional[str], training_on_james: bool = False
             "Provided data_root does not exist: "
             f"{candidate}. Set MSD_LUNG_DATA_ROOT or pass a valid path to --data-root."
         )
-    
+
     candidate = get_default_msd_root()
     if os.path.exists(candidate):
         return candidate
@@ -171,7 +165,10 @@ def train_unet3d(
 
     model = UNet3D(in_channels=1, out_channels=1, base_channels=16).to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
-    bce = nn.BCEWithLogitsLoss()
+
+    # Slight positive class up-weighting, though synthetic data is more balanced
+    pos_weight = torch.tensor([2.0], device=device)
+    bce = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
     model.train()
     global_step = 0
@@ -193,7 +190,7 @@ def train_unet3d(
 
             loss_bce = bce(logits, m)
             loss_dice = dice_loss(prob, m)
-            loss = loss_bce + loss_dice
+            loss = 0.5 * loss_bce + 0.5 * loss_dice
 
             loss.backward()
             optimizer.step()
@@ -232,19 +229,7 @@ def train_msd_unet3d(
     training_on_james: bool = False,
 ):
     """
-    Train UNet3D on real MSD Task06 Lung data using random 3D patches.
-
-    Args:
-        data_root: Folder containing dataset.json, imagesTr, labelsTr, etc.
-        epochs: Number of epochs to train.
-        batch_size: Training batch size (number of patches).
-        patch_size: Spatial size of extracted 3D patches.
-        lr: Learning rate for Adam optimizer.
-        num_workers: DataLoader workers.
-        device: Override compute device; defaults to CUDA if available.
-        save_path: Optional path to save checkpoint; defaults to inference path.
-        augment: Whether to apply simple random flips.
-        training_on_james: If True, force the dataset path to James's local copy.
+    Train UNet3D on real MSD Task06 Lung data using tumor-aware 3D patches.
     """
 
     if device is None:
@@ -275,14 +260,17 @@ def train_msd_unet3d(
 
     model = UNet3D(in_channels=1, out_channels=1, base_channels=16).to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
-    bce = nn.BCEWithLogitsLoss()
+
+    # Stronger up-weighting for very sparse tumor voxels
+    pos_weight = torch.tensor([5.0], device=device)
+    bce = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
     model.train()
     for epoch in range(epochs):
         running_loss = 0.0
         for images, masks in dataloader:
-            images = images.to(device)
-            masks = masks.to(device)
+            images = images.to(device)  # (B,1,D,H,W)
+            masks = masks.to(device)    # (B,1,D,H,W), 0/1
 
             optimizer.zero_grad()
             logits = model(images)
@@ -290,7 +278,7 @@ def train_msd_unet3d(
 
             loss_bce = bce(logits, masks)
             loss_dice = dice_loss(probs, masks)
-            loss = loss_bce + loss_dice
+            loss = 0.5 * loss_bce + 0.5 * loss_dice
 
             loss.backward()
             optimizer.step()
@@ -310,7 +298,7 @@ def train_msd_unet3d(
             "epochs": epochs,
             "patch_size": list(patch_size),
             "lr": lr,
-            "notes": "Trained UNet3D on MSD Task06 Lung patches",
+            "notes": "UNet3D trained on MSD Task06 Lung patches with tumor-aware sampling",
         },
     }
     torch.save(checkpoint, save_path)
@@ -320,7 +308,11 @@ def train_msd_unet3d(
 
 def _parse_args():
     parser = argparse.ArgumentParser(description="Train UNet3D for lung segmentation")
-    parser.add_argument("--train-msd", action="store_true", help="Train on MSD Task06 Lung instead of synthetic data")
+    parser.add_argument(
+        "--train-msd",
+        action="store_true",
+        help="Train on MSD Task06 Lung instead of synthetic data",
+    )
     parser.add_argument("--data-root", type=str, default=None, help="Path to MSD Task06 Lung dataset root")
     parser.add_argument("--epochs", type=int, default=5, help="Number of training epochs")
     parser.add_argument("--batch-size", type=int, default=1, help="Batch size")
