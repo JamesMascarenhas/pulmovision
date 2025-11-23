@@ -73,8 +73,6 @@ def percentile_threshold_segmentation(volume, percentile=99.0):
 
 
 # -------------------------------------------------------------------------
-<<<<<<< Updated upstream
-=======
 # HU threshold segmentation (classical baseline)
 # -------------------------------------------------------------------------
 
@@ -203,7 +201,6 @@ def hu_threshold_segmentation(volume, threshold_hu: float = -300.0) -> np.ndarra
 
 
 # -------------------------------------------------------------------------
->>>>>>> Stashed changes
 # UNet3D-based segmentation
 # -------------------------------------------------------------------------
 
@@ -561,8 +558,6 @@ def run_unet3d_segmentation(
     prob_np = np.array(prob.cpu().tolist(), dtype=np.float32)[0, 0]  # D,H,W
     prob_hwd = np.transpose(prob_np, (1, 2, 0))  # H,W,D
 
-<<<<<<< Updated upstream
-=======
     print(
         "UNet3D Debug — Probability stats:",
         "min=", float(prob_np.min()),
@@ -570,7 +565,6 @@ def run_unet3d_segmentation(
         "mean=", float(prob_np.mean()),
     )
 
->>>>>>> Stashed changes
     mask = (prob_hwd >= threshold).astype(np.uint8)
     return mask
 

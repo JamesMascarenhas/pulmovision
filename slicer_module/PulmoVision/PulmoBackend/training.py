@@ -238,12 +238,15 @@ def train_msd_unet3d(
     resolved_root = _resolve_data_root(data_root, training_on_james=training_on_james)
     if not os.path.exists(resolved_root):
         raise FileNotFoundError(f"MSD data root does not exist: {resolved_root}")
+    print(f"Using MSD Task06 Lung dataset at: {resolved_root}")
 
     if save_path is None:
         save_path = get_default_msd_unet3d_checkpoint_path()
         ckpt_dir = os.path.dirname(save_path)
         os.makedirs(ckpt_dir, exist_ok=True)
 
+    print(f"Checkpoints will be written to: {save_path}")
+    
     dataset = MSDTask06LungDataset(
         data_root=str(resolved_root),
         split="train",

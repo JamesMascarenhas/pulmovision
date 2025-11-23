@@ -124,8 +124,6 @@ def run_pulmo_pipeline(volume,
         segmentation_kwargs = {}
     else:
         segmentation_kwargs = dict(segmentation_kwargs)
-<<<<<<< Updated upstream
-=======
 
     method_lower = (segmentation_method or "").lower().strip()
 
@@ -143,7 +141,6 @@ def run_pulmo_pipeline(volume,
     else:
         segmentation_volume = preprocessed
 
->>>>>>> Stashed changes
     segmentation_output = run_placeholder_segmentation(
         preprocessed,
         method=segmentation_method,
