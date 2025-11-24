@@ -3,7 +3,6 @@ PulmoVision Backend - Inference
 
 This module provides:
 - Simple percentile-based placeholder segmentation.
-- Classical HU-Threshold segmentation.
 - UNet3D-based segmentation using a trained model.
 
 All functions operate on NumPy arrays, typically preprocessed volumes with
@@ -13,6 +12,8 @@ values in [0, 1].
 import os
 import warnings
 from typing import Optional, Dict, Tuple, Any
+from .msd_lung_dataset import _normalize_intensity, DEFAULT_CLIP_RANGE
+
 
 import numpy as np
 
@@ -77,28 +78,126 @@ def percentile_threshold_segmentation(volume, percentile=99.0):
 
 
 def hu_threshold_segmentation(volume, threshold_hu: float = -300.0) -> np.ndarray:
-    """Segment a volume by applying a fixed HU threshold.
+    """
+    Heuristic HU-based lung tumor segmentation.
+
+    Strategy:
+      1. Seed lung air as very low HU (HU < -700).
+      2. Dilate a few times to approximate full lung parenchyma.
+      3. Inside this lung ROI, mark voxels denser than lung parenchyma
+         (HU > -150) as tumor candidates.
+      4. Keep only the largest connected component (6-connected).
+
+    Note: `threshold_hu` is kept in the signature for compatibility with
+    callers, but the internal thresholds are tuned for MSD-style lung CT.
 
     Parameters
     ----------
     volume : np.ndarray
         Raw CT volume in Hounsfield Units, shape (H, W, D).
     threshold_hu : float, optional
-        HU cutoff for inclusion in the mask. Literature-aligned default is -300 HU.
+        Unused in this heuristic (kept for call compatibility).
 
     Returns
     -------
     mask : np.ndarray
         Binary mask, same shape as input, dtype uint8 (0 or 1).
     """
+    import numpy as _np
 
-    vol = np.asarray(volume, dtype=np.float32)
-
+    vol = _np.asarray(volume, dtype=_np.float32)
     if vol.ndim != 3:
         raise ValueError("hu_threshold_segmentation expects a 3D volume (H, W, D)")
 
-    mask = (vol >= float(threshold_hu)).astype(np.uint8)
-    return mask
+    H, W, D = vol.shape
+
+    # ------------------------------------------------------------------
+    # 1) Lung air seed: clearly air-like voxels
+    # ------------------------------------------------------------------
+    lung_seed = vol < -700.0  # stricter than -300 to avoid grabbing the whole body
+
+    # ------------------------------------------------------------------
+    # 2) Dilate a bit to approximate full lungs
+    # ------------------------------------------------------------------
+    lung_mask = lung_seed.copy()
+    for _ in range(3):  # fewer iterations: keep ROI near lungs
+        padded = _np.pad(lung_mask, 1, mode="constant", constant_values=False)
+        expanded = _np.zeros_like(lung_mask, dtype=bool)
+        for dz in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    expanded |= padded[
+                        1 + dx : 1 + dx + H,
+                        1 + dy : 1 + dy + W,
+                        1 + dz : 1 + dz + D,
+                    ]
+        lung_mask = expanded
+
+    # ------------------------------------------------------------------
+    # 3) Solid-ish candidates inside lung ROI
+    # ------------------------------------------------------------------
+    solid_candidates = vol > -150.0  # denser than parenchyma, but includes tumor & vessels
+    candidates = lung_mask & solid_candidates
+
+    # Debug summary
+    print(
+        "DEBUG HU (v2):",
+        "lung_seed_voxels =", int(lung_seed.sum()),
+        "lung_mask_voxels =", int(lung_mask.sum()),
+        "candidate_voxels =", int(candidates.sum()),
+    )
+
+    if not _np.any(candidates):
+        return _np.zeros_like(vol, dtype=_np.uint8)
+
+    # ------------------------------------------------------------------
+    # 4) Largest connected component (6-connected) in candidates
+    # ------------------------------------------------------------------
+    visited = _np.zeros_like(candidates, dtype=bool)
+    largest_component = _np.zeros_like(candidates, dtype=bool)
+    max_size = 0
+
+    neighbors = [
+        (1, 0, 0),
+        (-1, 0, 0),
+        (0, 1, 0),
+        (0, -1, 0),
+        (0, 0, 1),
+        (0, 0, -1),
+    ]
+
+    for x in range(H):
+        for y in range(W):
+            for z in range(D):
+                if candidates[x, y, z] and not visited[x, y, z]:
+                    stack = [(x, y, z)]
+                    visited[x, y, z] = True
+                    component_voxels = [(x, y, z)]
+
+                    while stack:
+                        cx, cy, cz = stack.pop()
+                        for dx, dy, dz in neighbors:
+                            nx, ny, nz = cx + dx, cy + dy, cz + dz
+                            if (
+                                0 <= nx < H
+                                and 0 <= ny < W
+                                and 0 <= nz < D
+                                and candidates[nx, ny, nz]
+                                and not visited[nx, ny, nz]
+                            ):
+                                visited[nx, ny, nz] = True
+                                stack.append((nx, ny, nz))
+                                component_voxels.append((nx, ny, nz))
+
+                    comp_size = len(component_voxels)
+                    if comp_size > max_size:
+                        max_size = comp_size
+                        largest_component.fill(False)
+                        for vx, vy, vz in component_voxels:
+                            largest_component[vx, vy, vz] = True
+
+    return largest_component.astype(_np.uint8)
+
 
 
 # -------------------------------------------------------------------------
@@ -415,11 +514,13 @@ def run_unet3d_segmentation(
     seed: int = 0,
 ) -> np.ndarray:
     """
-    Run UNet3D-based segmentation on a preprocessed CT volume.
+    Run UNet3D-based segmentation on a CT volume.
 
     Args:
-        volume: H x W x D float32 numpy array in [0, 1] or similar.
-        weights_path: Optional path to .pth file. If None, uses default checkpoints path.
+        volume: H x W x D float32 NumPy array in Hounsfield Units.
+                It will be clipped to DEFAULT_CLIP_RANGE and normalized
+                to [0, 1] using the same logic as the MSD dataset loader.
+        weights_path: Optional path to .pt file. If None, uses default checkpoints path.
         device: 'cpu' or 'cuda'.
         threshold: probability threshold for binarizing the output.
 
@@ -430,7 +531,7 @@ def run_unet3d_segmentation(
         raise ValueError(f"Expected volume of shape (H, W, D), got {volume.shape}")
 
     if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        device = "cuda" if torch and torch.cuda.is_available() else "cpu"
 
     if model is None:
         model, _ = load_unet3d_model(
@@ -440,14 +541,13 @@ def run_unet3d_segmentation(
             strict=False,
         )
 
-    # Normalize volume to [0, 1] if needed
-    v = volume.astype(np.float32)
-    v = (v - v.min()) / (v.max() - v.min() + 1e-6)
+    # Match MSD training preprocessing
+    v = np.asarray(volume, dtype=np.float32)
+    v = _normalize_intensity(v, DEFAULT_CLIP_RANGE)   # [0,1] after HU clip
 
-    # Our convention in the backend: volume is H x W x D.
+    # Backend convention: volume is H x W x D.
     # PyTorch expects N x C x D x H x W.
     v_dhw = np.transpose(v, (2, 0, 1))  # D,H,W
-    # Always use list-based construction because Slicer’s PyTorch lacks NumPy support
     v_tensor = torch.tensor(v_dhw.tolist(), dtype=torch.float32)[None, None, ...]  # 1,1,D,H,W
     v_tensor = v_tensor.to(device)
 
@@ -456,12 +556,14 @@ def run_unet3d_segmentation(
         prob = torch.sigmoid(logits)
 
     prob_np = np.array(prob.cpu().tolist(), dtype=np.float32)[0, 0]  # D,H,W
-    prob_hwd = np.transpose(prob_np, (1, 2, 0))  # back to H,W,D
+    prob_hwd = np.transpose(prob_np, (1, 2, 0))  # H,W,D
 
-    print("UNet3D Debug — Probability stats:",
-      "min=", float(prob_np.min()),
-      "max=", float(prob_np.max()),
-      "mean=", float(prob_np.mean()))
+    print(
+        "UNet3D Debug — Probability stats:",
+        "min=", float(prob_np.min()),
+        "max=", float(prob_np.max()),
+        "mean=", float(prob_np.mean()),
+    )
 
     mask = (prob_hwd >= threshold).astype(np.uint8)
     return mask
@@ -477,8 +579,7 @@ def run_placeholder_segmentation(
     method="unet3d",
     *,
     return_metadata: bool = False,
-   allow_hu_threshold_fallback: bool = False,
-    hu_volume: Optional[np.ndarray] = None,
+    allow_fallback_to_percentile: bool = False,
     **kwargs,
 ):
     """
@@ -493,12 +594,8 @@ def run_placeholder_segmentation(
         Segmentation method name. Supported:
         - "percentile": uses percentile_threshold_segmentation
           kwargs: percentile=...
-          "hu_threshold": fixed HU cutoff (threshold_hu=-300 by default).
         - "unet3d": uses run_unet3d_segmentation
           kwargs: weights_path=..., device=..., threshold=...
-    allow_hu_threshold_fallback : bool, optional
-        When True (or when allow_hu_threshold_fallback is passed in kwargs),
-        allow UNet3D failures to fall back to hu_threshold_segmentation.
 
     Returns
     -------
@@ -509,14 +606,9 @@ def run_placeholder_segmentation(
         strategy was used and any fallback messages.
     """
     method = (method or "").lower().strip() or "unet3d"
-    allow_hu_threshold_fallback = bool(
-        kwargs.pop("allow_hu_threshold_fallback", allow_hu_threshold_fallback)
-    )
     percentile = float(kwargs.pop("percentile", 99.0))
-    threshold_hu = float(kwargs.pop("threshold_hu", -300.0))
     device = kwargs.get("device")
     seed = kwargs.get("seed", 0)
-    threshold = float(kwargs.get("threshold", 0.5))
     metadata: Dict[str, object] = {
         "requested_method": method,
         "used_method": None,
@@ -525,37 +617,25 @@ def run_placeholder_segmentation(
         "checkpoint_loaded": False,
         "messages": [],
         "checkpoint_metadata": None,
-        "threshold": threshold,
     }
 
-    if method == "hu_threshold":
-        metadata["used_method"] = "hu_threshold"
-        hu_source = volume if hu_volume is None else hu_volume
-        mask = hu_threshold_segmentation(hu_source, threshold_hu=threshold_hu)
-        return (mask, metadata) if return_metadata else mask
-    
     if method == "percentile":
         metadata["used_method"] = "percentile"
         mask = percentile_threshold_segmentation(volume, percentile=percentile)
         return (mask, metadata) if return_metadata else mask
     
-    if method == "unet3d":
-        torch_ready = _TORCH_AVAILABLE and UNet3D is not None
-        if not torch_ready:
-            reason = (
-                "PyTorch is not installed" if not _TORCH_AVAILABLE else "UNet3D could not be imported"
-            )
-            msg = (
-                f"UNet3D segmentation unavailable: {reason}. "
-                "Apply classical HU thresholding at -300 HU or install the missing dependencies."
-            )
-            metadata["messages"].append(msg)
-            if not allow_hu_threshold_fallback:
-                raise RuntimeError(msg)
+    torch_ready = _TORCH_AVAILABLE and UNet3D is not None
 
-            metadata["used_method"] = "hu_threshold"
-            hu_source = volume if hu_volume is None else hu_volume
-            mask = hu_threshold_segmentation(hu_source, threshold_hu=threshold_hu)
+    if method == "unet3d":
+        if not torch_ready:
+            metadata["messages"].append(
+                "UNet3D segmentation unavailable: PyTorch is not installed."
+                "Install the official 'PyTorch' extension using Slicer's Extensions Manager:"
+                "  View → Extensions Manager → Search 'PyTorch' → Install"
+                "After installing and restarting Slicer, UNet3D segmentation will be enabled"
+            )
+            metadata["used_method"] = "percentile"
+            mask = percentile_threshold_segmentation(volume, percentile=percentile)
             return (mask, metadata) if return_metadata else mask
         
         weights_path = kwargs.get("weights_path") or None
@@ -570,7 +650,7 @@ def run_placeholder_segmentation(
                 device=device,
                 seed=seed,
                 strict=False,
-                allow_synthetic_fallback=allow_hu_threshold_fallback,
+                allow_synthetic_fallback=allow_fallback_to_percentile,
             )
             metadata["checkpoint_exists"] = True
             metadata["checkpoint_loaded"] = bool(loaded_any)
@@ -579,44 +659,35 @@ def run_placeholder_segmentation(
         except FileNotFoundError as exc:
             metadata["checkpoint_exists"] = False
             metadata["messages"].append(str(exc))
-            if not allow_hu_threshold_fallback:
-                raise RuntimeError(str(exc))
         except Exception as exc:  # noqa: BLE001 - surface load errors
             metadata["checkpoint_exists"] = True
             metadata["messages"].append(str(exc))
-            if not allow_hu_threshold_fallback:
-                raise RuntimeError(str(exc))
         else:
             try:
                 mask = run_unet3d_segmentation(
                     volume,
                     model=model,
                     device=device,
-                    threshold=threshold,
+                    threshold=float(kwargs.get("threshold", 0.5)),
                     seed=seed,
                 )
                 metadata["used_method"] = "unet3d"
                 return (mask, metadata) if return_metadata else mask
             except Exception as exc:  # noqa: BLE001 - signal fallback cause
                 metadata["messages"].append(
-                    f"UNet3D segmentation unavailable ({exc})."
+                    f"UNet3D segmentation unavailable ({exc}). Falling back to percentile heuristic."
                 )
-                if not allow_hu_threshold_fallback:
-                    raise RuntimeError(str(exc))
-        if not allow_hu_threshold_fallback:
-            metadata["messages"].append(
-                "UNet3D was requested but usable weights were not found."
-            )
-            raise RuntimeError("UNet3D checkpoint unavailable and fallback disabled")
-            
+        if not allow_fallback_to_percentile:
+            messages = "; ".join(metadata.get("messages", [])) or "UNet3D checkpoint unavailable"
+            raise RuntimeError(messages)
+        
         if method == "unet3d" and metadata["used_method"] != "unet3d":
             metadata["messages"].append(
-                "UNet3D was requested but usable weights were not found; using HU threshold segmentation instead."
+                "UNet3D was requested but usable weights were not found; using percentile segmentation instead."
             )
 
-        metadata["used_method"] = "hu_threshold"
-        hu_source = volume if hu_volume is None else hu_volume
-        mask = hu_threshold_segmentation(hu_source, threshold_hu=threshold_hu)
+        metadata["used_method"] = "percentile"
+        mask = percentile_threshold_segmentation(volume, percentile=percentile)
         return (mask, metadata) if return_metadata else mask
 
     raise ValueError(f"Unsupported segmentation method: {method!r}")

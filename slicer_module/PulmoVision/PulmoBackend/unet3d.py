@@ -96,7 +96,7 @@ class UNet3D(nn.Module):
     Output: N x 1 x D x H x W (logits)
     """
 
-    def __init__(self, in_channels: int = 1, out_channels: int = 1, base_channels: int = 16):
+    def __init__(self, in_channels: int = 1, out_channels: int = 1, base_channels: int = 32):
         super().__init__()
 
         # Encoder
@@ -134,4 +134,3 @@ class UNet3D(nn.Module):
 
         logits = self.outc(x)
         return logits
-

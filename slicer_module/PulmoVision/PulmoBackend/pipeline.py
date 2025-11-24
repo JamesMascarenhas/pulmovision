@@ -65,16 +65,14 @@ def run_pulmo_pipeline(volume,
         Upper bound of normalization range (default 1.0).
     segmentation_method : str, optional
         Segmentation method name for the backend. Currently:
-       - "hu_threshold": classical fixed HU cutoff (threshold_hu=-300 by default).
-        - "percentile": debug-only percentile heuristic.
-        - "unet3d": attempt UNet3D inference; falls back to HU threshold if unavailable.
+        - "percentile": use run_placeholder_segmentation with percentile threshold.
+        - "unet3d": attempt UNet3D inference; fall back to percentile if weights missing.
     segmentation_kwargs : dict, optional
         Extra keyword arguments forwarded to the segmentation function.
         For method "percentile", you can pass {"percentile": 99.0}, etc.
-        For method "hu_threshold", pass {"threshold_hu": -300.0} to override the default.
         For method "unet3d", pass {"weights_path": ..., "device": ..., "threshold": ...}.
         return_metadata : bool, optional
-        If True, return segmentation metadata (used/requested method, checkpoint info).
+        If True, return segmentation metadata (used/requested method, checkpoint info). 
     postprocess : bool, optional
         If True, apply postprocess_mask to the raw mask.
     postprocess_kwargs : dict, optional
@@ -121,29 +119,32 @@ def run_pulmo_pipeline(volume,
     )
 
     # 2. Segmentation (placeholder, to be replaced by 3D U-Net later)
+    # 2. Segmentation
     if segmentation_kwargs is None:
         segmentation_kwargs = {}
     else:
         segmentation_kwargs = dict(segmentation_kwargs)
 
+    method_lower = (segmentation_method or "").lower().strip()
+
     # Default to a safe HU-threshold fallback when UNet3D is requested.
-    # This keeps the pipeline runnable in environments without PyTorch or
-    # when checkpoints are missing, matching the user-facing help text.
-    if (segmentation_method or "").lower().strip() == "unet3d":
+    if method_lower == "unet3d":
         segmentation_kwargs.setdefault("allow_hu_threshold_fallback", True)
 
-    # HU-threshold segmentation and UNet fallbacks must operate on HU values.
+    # HU-threshold segmentation and UNet need to operate on HU values.
     hu_volume = vol.astype(np.float32)
 
-    segmentation_volume = preprocessed
-    if (segmentation_method or "").lower().strip() == "hu_threshold":
+    # Percentile/debug segmentation can work on the preprocessed volume;
+    # classical HU and UNet both see the raw HU array.
+    if method_lower in ("hu_threshold", "unet3d"):
         segmentation_volume = hu_volume
+    else:
+        segmentation_volume = preprocessed
 
     segmentation_output = run_placeholder_segmentation(
-        segmentation_volume,
+        preprocessed,
         method=segmentation_method,
         return_metadata=bool(return_metadata),
-        hu_volume=hu_volume,
         **segmentation_kwargs,
     )
 
@@ -160,17 +161,6 @@ def run_pulmo_pipeline(volume,
     else:
         final_mask = raw_mask
     
-     # Surface a clear message when the segmentation ends up empty; this helps
-    # users understand why radiomics outputs are zero/NaN even though
-    # UNet3D ran without explicit errors.
-    if final_mask.sum() == 0:
-        empty_msg = (
-            "Segmentation mask is empty after postprocessing; radiomics features "
-            "will be zero/NaN unless foreground voxels are present."
-        )
-        if segmentation_metadata is not None:
-            segmentation_metadata.setdefault("messages", []).append(empty_msg)
-            
     features = None
     if compute_features:
         if feature_kwargs is None:
