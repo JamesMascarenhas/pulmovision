@@ -142,7 +142,7 @@ def run_pulmo_pipeline(volume,
         segmentation_volume = preprocessed
 
     segmentation_output = run_placeholder_segmentation(
-        preprocessed,
+        segmentation_volume,
         method=segmentation_method,
         return_metadata=bool(return_metadata),
         **segmentation_kwargs,

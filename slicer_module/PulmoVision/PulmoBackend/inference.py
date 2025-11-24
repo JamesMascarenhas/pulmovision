@@ -580,6 +580,7 @@ def run_placeholder_segmentation(
     *,
     return_metadata: bool = False,
     allow_fallback_to_percentile: bool = False,
+    allow_hu_threshold_fallback: bool = False,
     **kwargs,
 ):
     """
@@ -607,6 +608,7 @@ def run_placeholder_segmentation(
     """
     method = (method or "").lower().strip() or "unet3d"
     percentile = float(kwargs.pop("percentile", 99.0))
+    threshold_hu = float(kwargs.get("threshold_hu", -300.0))
     device = kwargs.get("device")
     seed = kwargs.get("seed", 0)
     metadata: Dict[str, object] = {
@@ -677,17 +679,22 @@ def run_placeholder_segmentation(
                 metadata["messages"].append(
                     f"UNet3D segmentation unavailable ({exc}). Falling back to percentile heuristic."
                 )
-        if not allow_fallback_to_percentile:
-            messages = "; ".join(metadata.get("messages", [])) or "UNet3D checkpoint unavailable"
-            raise RuntimeError(messages)
-        
-        if method == "unet3d" and metadata["used_method"] != "unet3d":
+        if allow_hu_threshold_fallback:
             metadata["messages"].append(
-                "UNet3D was requested but usable weights were not found; using percentile segmentation instead."
+                "UNet3D was requested but usable weights were not found; using HU Threshold segmentation instead."
             )
 
-        metadata["used_method"] = "percentile"
-        mask = percentile_threshold_segmentation(volume, percentile=percentile)
-        return (mask, metadata) if return_metadata else mask
+        if allow_fallback_to_percentile:
+            if method == "unet3d" and metadata["used_method"] != "unet3d":
+                metadata["messages"].append(
+                    "UNet3D was requested but usable weights were not found; using percentile segmentation instead."
+                )
+
+            metadata["used_method"] = "percentile"
+            mask = percentile_threshold_segmentation(volume, percentile=percentile)
+            return (mask, metadata) if return_metadata else mask
+
+        messages = "; ".join(metadata.get("messages", [])) or "UNet3D checkpoint unavailable"
+        raise RuntimeError(messages)
 
     raise ValueError(f"Unsupported segmentation method: {method!r}")
