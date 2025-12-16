@@ -4,6 +4,8 @@
 
 PulmoVision is an end-to-end 3D Slicer extension for automated radiomic analysis of CT lung tumors. It provides a full pipeline—from preprocessing to segmentation to feature extraction—accessible through a one-click Slicer UI. The backend is written entirely in Python (NumPy, SimpleITK, PyTorch), enabling both Slicer-integrated execution and standalone usage for experimentation or batch processing.
 
+> **Project scope:** PulmoVision is an early-stage research prototype intended for experimentation, education, and reproducibility. It is **not** cleared for clinical or diagnostic use.
+
 ---
 
 ## Example UI
@@ -118,12 +120,15 @@ Expected structure:
 
 PulmoVision resolves the dataset location in this order:
 
-1. `--data-root` argument passed to the training script.  
-2. `MSD_LUNG_DATA_ROOT` environment variable.  
+1. `--data-root` argument passed to the training script.
+2. `MSD_LUNG_DATA_ROOT` environment variable.
 3. A default path defined in `msd_lung_dataset.py`.
 
 `data/msd_example/dataset.json` documents the expected metadata schema but contains no real volumes.
 
+**Why MSD and not LUNA16?** MSD Task06 provides easy access with quick downloading and testing, which made it straightforward to prototype the full PulmoVision pipeline without complex preprocessing. LUNA16 remains harder to obtain and integrate. For this proof-of-concept release, MSD offered the fastest path to a reproducible demo while still reflecting real-world CT lung data.
+
+**Roadmap:** I plan to incorporate a substantially larger and more diverse dataset in future iterations to improve UNet3D segmentation accuracy and robustness. When that happens, I will update the training instructions and checkpoints tuned for the new data.
 ---
 
 ## Using PulmoVision in 3D Slicer
