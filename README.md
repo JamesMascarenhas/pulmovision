@@ -128,7 +128,7 @@ PulmoVision resolves the dataset location in this order:
 
 **Why MSD and not LUNA16?** MSD Task06 provides easy access with quick downloading and testing, which made it straightforward to prototype the full PulmoVision pipeline without complex preprocessing. LUNA16 remains harder to obtain and integrate. For this proof-of-concept release, MSD offered the fastest path to a reproducible demo while still reflecting real-world CT lung data.
 
-**Roadmap:** I plan to incorporate a substantially larger and more diverse dataset in future iterations to improve UNet3D segmentation accuracy and robustness. When that happens, I will update the training instructions and checkpoints tuned for the new data.
+**Roadmap** I plan to incorporate a substantially larger and more diverse dataset in future iterations to improve UNet3D segmentation accuracy and robustness. When that happens, I will update the training instructions and checkpoints tuned for the new data.
 ---
 
 ## Using PulmoVision in 3D Slicer
